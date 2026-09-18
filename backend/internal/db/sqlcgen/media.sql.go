@@ -14,7 +14,7 @@ import (
 const addMediaToLibrary = `-- name: AddMediaToLibrary :one
 
 UPDATE media SET added_at = COALESCE(added_at, CURRENT_TIMESTAMP) WHERE id = ?
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 func (q *Queries) AddMediaToLibrary(ctx context.Context, id int64) (Medium, error) {
@@ -41,6 +41,7 @@ func (q *Queries) AddMediaToLibrary(ctx context.Context, id int64) (Medium, erro
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -61,7 +62,7 @@ INSERT INTO media (
 ) VALUES (
     NULL, 'Local', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type CreateLocalMediaParams struct {
@@ -100,6 +101,7 @@ func (q *Queries) CreateLocalMedia(ctx context.Context, arg CreateLocalMediaPara
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -111,7 +113,7 @@ INSERT INTO media (
 ) VALUES (
     NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type CreateSourcelessMediaParams struct {
@@ -152,6 +154,7 @@ func (q *Queries) CreateSourcelessMedia(ctx context.Context, arg CreateSourceles
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -166,7 +169,7 @@ func (q *Queries) DeleteMedia(ctx context.Context, id int64) error {
 }
 
 const getLocalMediaByExternalID = `-- name: GetLocalMediaByExternalID :one
-SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank FROM media WHERE extension_id IS NULL AND external_id = ?
+SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at FROM media WHERE extension_id IS NULL AND external_id = ?
 `
 
 func (q *Queries) GetLocalMediaByExternalID(ctx context.Context, externalID string) (Medium, error) {
@@ -193,13 +196,14 @@ func (q *Queries) GetLocalMediaByExternalID(ctx context.Context, externalID stri
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
 
 const getMedia = `-- name: GetMedia :one
 
-SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank FROM media WHERE id = ?
+SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at FROM media WHERE id = ?
 `
 
 func (q *Queries) GetMedia(ctx context.Context, id int64) (Medium, error) {
@@ -226,12 +230,13 @@ func (q *Queries) GetMedia(ctx context.Context, id int64) (Medium, error) {
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
 
 const getMediaByExtensionAndExternalID = `-- name: GetMediaByExtensionAndExternalID :one
-SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank FROM media WHERE extension_id = ? AND external_id = ?
+SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at FROM media WHERE extension_id = ? AND external_id = ?
 `
 
 type GetMediaByExtensionAndExternalIDParams struct {
@@ -263,12 +268,13 @@ func (q *Queries) GetMediaByExtensionAndExternalID(ctx context.Context, arg GetM
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
 
 const listLibraryMediaForExport = `-- name: ListLibraryMediaForExport :many
-SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank FROM media WHERE added_at IS NOT NULL AND content_type != 'anime' ORDER BY id
+SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at FROM media WHERE added_at IS NOT NULL AND content_type != 'anime' ORDER BY id
 `
 
 func (q *Queries) ListLibraryMediaForExport(ctx context.Context) ([]Medium, error) {
@@ -301,6 +307,7 @@ func (q *Queries) ListLibraryMediaForExport(ctx context.Context) ([]Medium, erro
 			&i.ChaptersSyncedAt,
 			&i.CoverOverride,
 			&i.ContentBlockRank,
+			&i.MetadataSearchFailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -316,7 +323,7 @@ func (q *Queries) ListLibraryMediaForExport(ctx context.Context) ([]Medium, erro
 }
 
 const listLocalMedia = `-- name: ListLocalMedia :many
-SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank FROM media WHERE extension_id IS NULL AND extension_name = 'Local' ORDER BY title
+SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at FROM media WHERE extension_id IS NULL AND extension_name = 'Local' ORDER BY title
 `
 
 func (q *Queries) ListLocalMedia(ctx context.Context) ([]Medium, error) {
@@ -349,6 +356,7 @@ func (q *Queries) ListLocalMedia(ctx context.Context) ([]Medium, error) {
 			&i.ChaptersSyncedAt,
 			&i.CoverOverride,
 			&i.ContentBlockRank,
+			&i.MetadataSearchFailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -364,7 +372,7 @@ func (q *Queries) ListLocalMedia(ctx context.Context) ([]Medium, error) {
 }
 
 const listMediaByIDs = `-- name: ListMediaByIDs :many
-SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank FROM media WHERE id IN (/*SLICE:ids*/?)
+SELECT id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at FROM media WHERE id IN (/*SLICE:ids*/?)
 `
 
 func (q *Queries) ListMediaByIDs(ctx context.Context, ids []int64) ([]Medium, error) {
@@ -407,6 +415,7 @@ func (q *Queries) ListMediaByIDs(ctx context.Context, ids []int64) ([]Medium, er
 			&i.ChaptersSyncedAt,
 			&i.CoverOverride,
 			&i.ContentBlockRank,
+			&i.MetadataSearchFailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -490,7 +499,7 @@ func (q *Queries) MarkMediaExtensionRemoved(ctx context.Context, extensionID sql
 const removeMediaFromLibrary = `-- name: RemoveMediaFromLibrary :one
 
 UPDATE media SET added_at = NULL WHERE id = ?
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 func (q *Queries) RemoveMediaFromLibrary(ctx context.Context, id int64) (Medium, error) {
@@ -517,13 +526,14 @@ func (q *Queries) RemoveMediaFromLibrary(ctx context.Context, id int64) (Medium,
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
 
 const setMediaCoverOverride = `-- name: SetMediaCoverOverride :one
 
-UPDATE media SET cover_override = ?, cover_local_path = NULL WHERE id = ? RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+UPDATE media SET cover_override = ?, cover_local_path = NULL WHERE id = ? RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type SetMediaCoverOverrideParams struct {
@@ -555,6 +565,7 @@ func (q *Queries) SetMediaCoverOverride(ctx context.Context, arg SetMediaCoverOv
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -570,7 +581,7 @@ func (q *Queries) TouchMediaViewed(ctx context.Context, id int64) error {
 }
 
 const updateLocalMedia = `-- name: UpdateLocalMedia :one
-UPDATE media SET title = ?, cover_local_path = COALESCE(?, cover_local_path) WHERE id = ? RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+UPDATE media SET title = ?, cover_local_path = COALESCE(?, cover_local_path) WHERE id = ? RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type UpdateLocalMediaParams struct {
@@ -603,6 +614,7 @@ func (q *Queries) UpdateLocalMedia(ctx context.Context, arg UpdateLocalMediaPara
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -626,7 +638,7 @@ UPDATE media SET
     title = ?,
     cover_path = COALESCE(?3, cover_path)
 WHERE id = ?
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type UpdateSourcelessMediaParams struct {
@@ -659,6 +671,7 @@ func (q *Queries) UpdateSourcelessMedia(ctx context.Context, arg UpdateSourceles
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -672,7 +685,7 @@ ON CONFLICT(extension_id, external_id) DO UPDATE SET
     title = excluded.title,
     extension_name = excluded.extension_name,
     cover_path = COALESCE(excluded.cover_path, media.cover_path)
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type UpsertMediaBareParams struct {
@@ -715,6 +728,7 @@ func (q *Queries) UpsertMediaBare(ctx context.Context, arg UpsertMediaBareParams
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -734,7 +748,7 @@ ON CONFLICT(extension_id, external_id) DO UPDATE SET
     author      = COALESCE(NULLIF(excluded.author, ''),      media.author),
     artist      = COALESCE(NULLIF(excluded.artist, ''),      media.artist),
     details_fetched_at = CURRENT_TIMESTAMP
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type UpsertMediaDetailsParams struct {
@@ -785,6 +799,7 @@ func (q *Queries) UpsertMediaDetails(ctx context.Context, arg UpsertMediaDetails
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }

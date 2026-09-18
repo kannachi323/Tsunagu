@@ -164,6 +164,7 @@ type Querier interface {
 	SetMangaPagePath(ctx context.Context, arg SetMangaPagePathParams) error
 	SetMediaContentBlockRank(ctx context.Context, arg SetMediaContentBlockRankParams) error
 	SetMediaCoverOverride(ctx context.Context, arg SetMediaCoverOverrideParams) (Medium, error)
+	SetMediaMetadataSearchFailed(ctx context.Context, id int64) error
 	SetNovelChapterContentPath(ctx context.Context, arg SetNovelChapterContentPathParams) error
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	TouchMediaViewed(ctx context.Context, id int64) error

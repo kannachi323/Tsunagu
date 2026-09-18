@@ -10,7 +10,16 @@ import (
 	"strings"
 	"sync"
 
+	"tsunagu/backend/internal/anilistrl"
 	"tsunagu/backend/internal/db/sqlcgen"
+)
+
+type matchOutcome int
+
+const (
+	matchOutcomeError matchOutcome = iota
+	matchOutcomeNoMatch
+	matchOutcomeMatched
 )
 
 type Recomputer interface {
@@ -47,27 +56,35 @@ func (m *Manager) AutoEnrich(ctx context.Context, mediaID int64) error {
 	if err == nil && len(links) > 0 {
 		return nil
 	}
-	return m.tryMatch(ctx, media)
+	if outcome, _ := m.tryMatch(ctx, media); outcome == matchOutcomeNoMatch {
+		_ = m.q.SetMediaMetadataSearchFailed(ctx, mediaID)
+	}
+	return nil
 }
 
-func (m *Manager) tryMatch(ctx context.Context, media sqlcgen.Medium) error {
+// tryMatch searches for a match and applies it if confident enough. The
+// returned outcome tells the caller whether to record a "no match" cooldown
+// (so the same title isn't re-searched every run) or to stop the batch
+// entirely on a rate limit, rather than hammering every remaining title.
+func (m *Manager) tryMatch(ctx context.Context, media sqlcgen.Medium) (matchOutcome, error) {
 	cands, err := m.providers[DefaultProvider].Search(ctx, media.Title, contentTypeOf(media))
 	if err != nil {
 		log.Printf("metadata: auto search %q: %v", media.Title, err)
-		return nil
+		return matchOutcomeError, err
 	}
 	if len(cands) == 0 {
-		return nil
+		return matchOutcomeNoMatch, nil
 	}
 	best, score := bestMatch(media.Title, 0, cands)
 	if score < AutoApplyScore {
 		log.Printf("metadata: no confident match for %q (best %.2f)", media.Title, score)
-		return nil
+		return matchOutcomeNoMatch, nil
 	}
 	if _, err := m.applyCandidate(ctx, media.ID, DefaultProvider, best, score, false); err != nil {
 		log.Printf("metadata: apply auto match for media %d: %v", media.ID, err)
+		return matchOutcomeError, err
 	}
-	return nil
+	return matchOutcomeMatched, nil
 }
 
 func (m *Manager) EnrichLibrary(ctx context.Context) {
@@ -96,9 +113,16 @@ func (m *Manager) EnrichLibrary(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		_ = m.tryMatch(ctx, media)
-		if after, _ := m.q.ListMetadataLinksByMedia(ctx, id); len(after) > 0 {
+		outcome, err := m.tryMatch(ctx, media)
+		switch outcome {
+		case matchOutcomeMatched:
 			matched++
+		case matchOutcomeNoMatch:
+			_ = m.q.SetMediaMetadataSearchFailed(ctx, id)
+		}
+		if errors.Is(err, anilistrl.ErrRateLimited) {
+			log.Printf("metadata backfill: anilist rate-limited, paused after %d/%d (%d matched)", i+1, len(ids), matched)
+			return
 		}
 		if (i+1)%50 == 0 {
 			log.Printf("metadata backfill: %d/%d checked, %d matched", i+1, len(ids), matched)
@@ -119,11 +143,15 @@ func (m *Manager) refreshSparseTags(ctx context.Context) {
 			return
 		}
 		link, err := m.q.GetMetadataLink(ctx, sqlcgen.GetMetadataLinkParams{MediaID: id, Provider: DefaultProvider})
-		if err != nil {
+		if err != nil || link.Locked != 0 {
 			continue
 		}
 		if _, err := m.Apply(ctx, id, DefaultProvider, link.ProviderID); err != nil {
 			log.Printf("metadata backfill: refresh tags for media %d: %v", id, err)
+			if errors.Is(err, anilistrl.ErrRateLimited) {
+				log.Printf("metadata backfill: anilist rate-limited during sparse-tag refresh, stopping")
+				return
+			}
 		}
 	}
 }

@@ -122,26 +122,27 @@ type MediaTag struct {
 }
 
 type Medium struct {
-	ID                 int64          `json:"id"`
-	ExtensionID        sql.NullInt64  `json:"extension_id"`
-	ExtensionName      string         `json:"extension_name"`
-	ExternalID         string         `json:"external_id"`
-	ContentType        string         `json:"content_type"`
-	Title              string         `json:"title"`
-	CoverPath          sql.NullString `json:"cover_path"`
-	CoverLocalPath     sql.NullString `json:"cover_local_path"`
-	Description        sql.NullString `json:"description"`
-	Status             sql.NullString `json:"status"`
-	Author             sql.NullString `json:"author"`
-	Artist             sql.NullString `json:"artist"`
-	ExtensionRemovedAt sql.NullTime   `json:"extension_removed_at"`
-	AddedAt            sql.NullTime   `json:"added_at"`
-	LastViewedAt       sql.NullTime   `json:"last_viewed_at"`
-	DetailsFetchedAt   sql.NullTime   `json:"details_fetched_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
-	ChaptersSyncedAt   sql.NullTime   `json:"chapters_synced_at"`
-	CoverOverride      sql.NullString `json:"cover_override"`
-	ContentBlockRank   sql.NullInt64  `json:"content_block_rank"`
+	ID                     int64          `json:"id"`
+	ExtensionID            sql.NullInt64  `json:"extension_id"`
+	ExtensionName          string         `json:"extension_name"`
+	ExternalID             string         `json:"external_id"`
+	ContentType            string         `json:"content_type"`
+	Title                  string         `json:"title"`
+	CoverPath              sql.NullString `json:"cover_path"`
+	CoverLocalPath         sql.NullString `json:"cover_local_path"`
+	Description            sql.NullString `json:"description"`
+	Status                 sql.NullString `json:"status"`
+	Author                 sql.NullString `json:"author"`
+	Artist                 sql.NullString `json:"artist"`
+	ExtensionRemovedAt     sql.NullTime   `json:"extension_removed_at"`
+	AddedAt                sql.NullTime   `json:"added_at"`
+	LastViewedAt           sql.NullTime   `json:"last_viewed_at"`
+	DetailsFetchedAt       sql.NullTime   `json:"details_fetched_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
+	ChaptersSyncedAt       sql.NullTime   `json:"chapters_synced_at"`
+	CoverOverride          sql.NullString `json:"cover_override"`
+	ContentBlockRank       sql.NullInt64  `json:"content_block_rank"`
+	MetadataSearchFailedAt sql.NullTime   `json:"metadata_search_failed_at"`
 }
 
 type MetadataLink struct {

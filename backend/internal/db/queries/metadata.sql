@@ -62,7 +62,11 @@ SELECT m.id
 FROM media m
 WHERE m.added_at IS NOT NULL
   AND m.extension_id IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM metadata_links ml WHERE ml.media_id = m.id);
+  AND NOT EXISTS (SELECT 1 FROM metadata_links ml WHERE ml.media_id = m.id)
+  AND (m.metadata_search_failed_at IS NULL OR m.metadata_search_failed_at < datetime('now', '-7 days'));
+
+-- name: SetMediaMetadataSearchFailed :exec
+UPDATE media SET metadata_search_failed_at = CURRENT_TIMESTAMP WHERE id = ?;
 
 -- name: ListMetadataLinksByMediaIDs :many
 SELECT * FROM metadata_links WHERE media_id IN (sqlc.slice('media_ids'));

@@ -63,7 +63,7 @@ UPDATE media SET
         THEN NULLIF(CAST(?4 AS TEXT), '') ELSE cover_path END,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?5
-RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank
+RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
 `
 
 type GapFillMediaMetadataParams struct {
@@ -104,6 +104,7 @@ func (q *Queries) GapFillMediaMetadata(ctx context.Context, arg GapFillMediaMeta
 		&i.ChaptersSyncedAt,
 		&i.CoverOverride,
 		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
 	)
 	return i, err
 }
@@ -154,6 +155,7 @@ FROM media m
 WHERE m.added_at IS NOT NULL
   AND m.extension_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM metadata_links ml WHERE ml.media_id = m.id)
+  AND (m.metadata_search_failed_at IS NULL OR m.metadata_search_failed_at < datetime('now', '-7 days'))
 `
 
 func (q *Queries) ListMediaIDsWithoutMetadataLink(ctx context.Context) ([]int64, error) {
@@ -261,6 +263,15 @@ func (q *Queries) ListMetadataLinksByMediaIDs(ctx context.Context, mediaIds []in
 		return nil, err
 	}
 	return items, nil
+}
+
+const setMediaMetadataSearchFailed = `-- name: SetMediaMetadataSearchFailed :exec
+UPDATE media SET metadata_search_failed_at = CURRENT_TIMESTAMP WHERE id = ?
+`
+
+func (q *Queries) SetMediaMetadataSearchFailed(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, setMediaMetadataSearchFailed, id)
+	return err
 }
 
 const upsertMetadataLink = `-- name: UpsertMetadataLink :one

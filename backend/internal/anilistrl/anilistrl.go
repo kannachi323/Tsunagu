@@ -2,11 +2,17 @@ package anilistrl
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
 
-const minGap = 1500 * time.Millisecond
+const minGap = 3 * time.Second
+
+// ErrRateLimited is returned by callers once AniList has rate-limited a
+// request and a single retry still failed, so the caller can stop working
+// through a whole batch instead of hitting the same wall on every item.
+var ErrRateLimited = errors.New("anilist: rate limited")
 
 var (
 	mu       sync.Mutex
@@ -38,7 +44,7 @@ func Wait(ctx context.Context) error {
 
 func Backoff(retryAfterSeconds int) {
 	if retryAfterSeconds <= 0 {
-		retryAfterSeconds = 5
+		retryAfterSeconds = 60
 	}
 	extend := time.Now().Add(time.Duration(retryAfterSeconds) * time.Second)
 	mu.Lock()

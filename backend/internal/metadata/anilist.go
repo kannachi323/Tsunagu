@@ -47,17 +47,19 @@ func (a *AniList) query(ctx context.Context, doc string, vars map[string]any, ou
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+
 		if resp.StatusCode == http.StatusTooManyRequests {
 			n, _ := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
 			anilistrl.Backoff(n)
 			if attempt == 0 {
 				continue
 			}
-			return fmt.Errorf("anilist: %s: %s", resp.Status, snip(string(raw), 200))
+			return fmt.Errorf("%w: %s: %s", anilistrl.ErrRateLimited, resp.Status, snip(string(raw), 200))
 		}
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("anilist: %s: %s", resp.Status, snip(string(raw), 200))
 		}
+
 		var env struct {
 			Data   json.RawMessage `json:"data"`
 			Errors []struct {
@@ -68,7 +70,18 @@ func (a *AniList) query(ctx context.Context, doc string, vars map[string]any, ou
 			return fmt.Errorf("anilist: decode: %w", err)
 		}
 		if len(env.Errors) > 0 {
-			return fmt.Errorf("anilist: %s", env.Errors[0].Message)
+			msg := env.Errors[0].Message
+			// AniList sometimes signals rate-limiting as a 200 with a GraphQL
+			// error instead of an actual 429, so this needs the same backoff.
+			if strings.Contains(strings.ToLower(msg), "too many requests") {
+				n, _ := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+				anilistrl.Backoff(n)
+				if attempt == 0 {
+					continue
+				}
+				return fmt.Errorf("%w: %s", anilistrl.ErrRateLimited, msg)
+			}
+			return fmt.Errorf("anilist: %s", msg)
 		}
 		return json.Unmarshal(env.Data, out)
 	}
