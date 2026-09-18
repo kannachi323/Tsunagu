@@ -252,6 +252,48 @@ func (q *Queries) GetAnimeEpisodeStream(ctx context.Context, chapterID int64) (A
 	return i, err
 }
 
+const getAnyDownloadedAnimePathForMedia = `-- name: GetAnyDownloadedAnimePathForMedia :one
+SELECT a.local_path FROM anime_episode_streams a
+JOIN chapters c ON c.id = a.chapter_id
+WHERE c.media_id = ? AND a.local_path IS NOT NULL AND a.local_path != ''
+LIMIT 1
+`
+
+func (q *Queries) GetAnyDownloadedAnimePathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getAnyDownloadedAnimePathForMedia, mediaID)
+	var local_path sql.NullString
+	err := row.Scan(&local_path)
+	return local_path, err
+}
+
+const getAnyDownloadedMangaPathForMedia = `-- name: GetAnyDownloadedMangaPathForMedia :one
+SELECT mp.local_path FROM manga_pages mp
+JOIN chapters c ON c.id = mp.chapter_id
+WHERE c.media_id = ? AND mp.local_path IS NOT NULL AND mp.local_path != ''
+LIMIT 1
+`
+
+func (q *Queries) GetAnyDownloadedMangaPathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getAnyDownloadedMangaPathForMedia, mediaID)
+	var local_path sql.NullString
+	err := row.Scan(&local_path)
+	return local_path, err
+}
+
+const getAnyDownloadedNovelPathForMedia = `-- name: GetAnyDownloadedNovelPathForMedia :one
+SELECT nc.local_path FROM novel_chapter_content nc
+JOIN chapters c ON c.id = nc.chapter_id
+WHERE c.media_id = ? AND nc.local_path IS NOT NULL AND nc.local_path != ''
+LIMIT 1
+`
+
+func (q *Queries) GetAnyDownloadedNovelPathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getAnyDownloadedNovelPathForMedia, mediaID)
+	var local_path sql.NullString
+	err := row.Scan(&local_path)
+	return local_path, err
+}
+
 const getChapter = `-- name: GetChapter :one
 SELECT id, media_id, external_id, title, number, uploaded_at, source_order, first_seen_at, scanlator FROM chapters WHERE id = ?
 `

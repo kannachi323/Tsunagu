@@ -244,6 +244,7 @@ type Media struct {
 	TrackLinks         []*TrackLink       `json:"trackLinks"`
 	Metadata           *MetadataMatch     `json:"metadata,omitempty"`
 	Source             *Extension         `json:"source,omitempty"`
+	DownloadFolderPath *string            `json:"downloadFolderPath,omitempty"`
 }
 
 type MediaPage struct {
@@ -275,6 +276,11 @@ type MetadataMatch struct {
 	Confidence float64   `json:"confidence"`
 	Locked     bool      `json:"locked"`
 	MatchedAt  time.Time `json:"matchedAt"`
+}
+
+type MigrateMangaFormatResult struct {
+	ChaptersMigrated int32 `json:"chaptersMigrated"`
+	PagesMigrated    int32 `json:"pagesMigrated"`
 }
 
 type Mutation struct {

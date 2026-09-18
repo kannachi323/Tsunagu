@@ -40,13 +40,26 @@ func (r *Resolver) storageInfoModel() (*model.StorageInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("disk stats: %w", err)
 	}
+	// DataDir is often unset (no --data-dir flag), and DBPath defaults to a
+	// bare relative filename -- neither is a meaningful open-folder target as
+	// written, so resolve both against the (already absolute) media dir.
+	dataDir := c.DataDir
+	if dataDir == "" {
+		dataDir = r.MediaDir
+	} else if abs, err := filepath.Abs(dataDir); err == nil {
+		dataDir = abs
+	}
+	dbPath := c.DBPath
+	if abs, err := filepath.Abs(dbPath); err == nil {
+		dbPath = abs
+	}
 	return &model.StorageInfo{
 		UsedBytes:    float64(used),
 		TotalBytes:   float64(total),
 		FreeBytes:    float64(free),
-		DataDir:      c.DataDir,
+		DataDir:      dataDir,
 		MediaDir:     r.MediaDir,
-		DatabasePath: c.DBPath,
+		DatabasePath: dbPath,
 		Categories:   out,
 	}, nil
 }

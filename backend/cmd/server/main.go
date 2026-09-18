@@ -225,11 +225,14 @@ func main() {
 		}
 		return d
 	}
-	downloadMgr := download.New(q, supervised, absMediaDir, resolveDownloadsDir())
+	downloadMgr := download.New(q, supervised, absMediaDir, resolveDownloadsDir(), store.Config().MangaDownloadFormat)
 	downloadMgr.Start()
 	defer downloadMgr.Shutdown()
 	store.OnChange("downloads_dir", func(context.Context) {
 		downloadMgr.SetDownloadsDir(resolveDownloadsDir())
+	})
+	store.OnChange("manga_download_format", func(context.Context) {
+		downloadMgr.SetImageFormat(store.Config().MangaDownloadFormat)
 	})
 
 	resolveLocalSourceDir := func() string {

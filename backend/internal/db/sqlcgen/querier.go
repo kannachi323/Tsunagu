@@ -22,6 +22,8 @@ type Querier interface {
 	ClearMediaCoverPaths(ctx context.Context) error
 	CompleteDownload(ctx context.Context, id int64) error
 	CountChaptersByMediaIDs(ctx context.Context, mediaIds []int64) ([]CountChaptersByMediaIDsRow, error)
+	// Requires actual current file presence, not just a job row that once said
+	// "done" -- otherwise deleted/relocated downloads stay counted forever.
 	CountDownloadedChaptersByMediaIDs(ctx context.Context, mediaIds []int64) ([]CountDownloadedChaptersByMediaIDsRow, error)
 	CountDownloadedPagesByChapterIDs(ctx context.Context, chapterIds []int64) ([]CountDownloadedPagesByChapterIDsRow, error)
 	CountDownloadsByStatus(ctx context.Context) ([]CountDownloadsByStatusRow, error)
@@ -56,6 +58,9 @@ type Querier interface {
 	FailDownload(ctx context.Context, arg FailDownloadParams) error
 	GapFillMediaMetadata(ctx context.Context, arg GapFillMediaMetadataParams) (Medium, error)
 	GetAnimeEpisodeStream(ctx context.Context, chapterID int64) (AnimeEpisodeStream, error)
+	GetAnyDownloadedAnimePathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error)
+	GetAnyDownloadedMangaPathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error)
+	GetAnyDownloadedNovelPathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error)
 	GetChapter(ctx context.Context, id int64) (Chapter, error)
 	GetChapterByMediaAndExternalID(ctx context.Context, arg GetChapterByMediaAndExternalIDParams) (Chapter, error)
 	GetChapterDownloadContext(ctx context.Context, id int64) (GetChapterDownloadContextRow, error)

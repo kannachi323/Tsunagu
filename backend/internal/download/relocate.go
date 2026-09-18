@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"tsunagu/backend/internal/db/sqlcgen"
+	"tsunagu/backend/internal/localsource"
 )
 
 type RelocateResult struct {
@@ -161,7 +162,22 @@ func (m *Manager) rewritePaths(ctx context.Context, oldRoot, newRoot string) err
 		return err
 	}
 	for _, r := range pages {
-		np, ok := remap(r.LocalPath.String)
+		lp := r.LocalPath.String
+		if archivePath, entryName, ok := localsource.ParseZipPagePath(lp); ok {
+			np, ok := remap(archivePath)
+			if !ok {
+				continue
+			}
+			if err := m.q.SetMangaPagePath(ctx, sqlcgen.SetMangaPagePathParams{
+				LocalPath:  sql.NullString{String: localsource.ZipPagePath(np, entryName), Valid: true},
+				ChapterID:  r.ChapterID,
+				PageNumber: r.PageNumber,
+			}); err != nil {
+				return err
+			}
+			continue
+		}
+		np, ok := remap(lp)
 		if !ok {
 			continue
 		}

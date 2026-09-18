@@ -209,6 +209,7 @@ type ComplexityRoot struct {
 		ContentType        func(childComplexity int) int
 		Description        func(childComplexity int) int
 		DetailsFetchedAt   func(childComplexity int) int
+		DownloadFolderPath func(childComplexity int) int
 		DownloadedCount    func(childComplexity int) int
 		ExtensionID        func(childComplexity int) int
 		ExtensionName      func(childComplexity int) int
@@ -265,73 +266,79 @@ type ComplexityRoot struct {
 		URL        func(childComplexity int) int
 	}
 
+	MigrateMangaFormatResult struct {
+		ChaptersMigrated func(childComplexity int) int
+		PagesMigrated    func(childComplexity int) int
+	}
+
 	Mutation struct {
-		AddContentFilterRule      func(childComplexity int, category string, field model.FilterField, keyword string, minWeight *int32, blockLevel model.ContentBlockLevel) int
-		AddMediaToFolder          func(childComplexity int, mediaID string, folderID string) int
-		AddRepository             func(childComplexity int, indexURL string, name *string) int
-		ApplyMetadataMatch        func(childComplexity int, mediaID string, providerID string, provider *string) int
-		BindTrack                 func(childComplexity int, mediaID string, trackerKey string, remoteID string) int
-		ClearDownloads            func(childComplexity int, status []model.DownloadStatus) int
-		ClearImageCache           func(childComplexity int) int
-		ClearStorageCategory      func(childComplexity int, key string) int
-		CreateDatabaseBackup      func(childComplexity int) int
-		CreateFolder              func(childComplexity int, name string, parentFolderID *string) int
-		CreateTrackerStub         func(childComplexity int, trackerKey string, remoteID string, contentType model.ContentType, title string, coverURL *string) int
-		DeleteDatabaseBackup      func(childComplexity int, name string) int
-		DeleteDownload            func(childComplexity int, mediaID string, chapterIds []string) int
-		DeleteFolder              func(childComplexity int, folderID string) int
-		DeleteLocalSeries         func(childComplexity int, mediaID string) int
-		DeleteRepository          func(childComplexity int, repositoryID string) int
-		DequeueDownload           func(childComplexity int, mediaID string, chapterID string) int
-		DisableServerAuth         func(childComplexity int) int
-		EnqueueDownload           func(childComplexity int, mediaID string, chapterIds []string) int
-		ExportMihonBackup         func(childComplexity int) int
-		ImportMihonBackup         func(childComplexity int, name string) int
-		InstallCloudflareSolver   func(childComplexity int) int
-		InstallExtension          func(childComplexity int, packageName string) int
-		InstallExternalExtension  func(childComplexity int, url string) int
-		MarkChapterRead           func(childComplexity int, mediaID string, chapterID string) int
-		MarkChaptersRead          func(childComplexity int, mediaID string, chapterIds []string, read bool) int
-		MigrateMedia              func(childComplexity int, fromMediaID string, toExtensionID string, toExternalID string) int
-		PullTracker               func(childComplexity int, mediaID string) int
-		RecomputeContentFilter    func(childComplexity int) int
-		RefetchMediaCover         func(childComplexity int, mediaID string) int
-		RefreshFolder             func(childComplexity int, folderID string) int
-		RefreshMetadata           func(childComplexity int, mediaID string, syncChapters *bool) int
-		RefreshMetadataMatch      func(childComplexity int, mediaID string) int
-		RelocateDownloads         func(childComplexity int, newPath string, migrate bool) int
-		RelocateLocalSource       func(childComplexity int, newPath string, migrate bool) int
-		RemoveContentFilterRule   func(childComplexity int, id string) int
-		RemoveMediaFromFolder     func(childComplexity int, mediaID string, folderID string) int
-		RenameFolder              func(childComplexity int, folderID string, name string) int
-		RenameRepository          func(childComplexity int, repositoryID string, name string) int
-		ReorderDownload           func(childComplexity int, mediaID string, chapterID string, position int32) int
-		ReorderFolder             func(childComplexity int, folderID string, sortOrder int32) int
-		RescanLocalMedia          func(childComplexity int) int
-		ResetContentFilterRules   func(childComplexity int) int
-		ResyncTrack               func(childComplexity int, linkID string) int
-		RetryDownload             func(childComplexity int, mediaID string, chapterID string) int
-		SetInLibrary              func(childComplexity int, mediaID string, inLibrary bool) int
-		SetMediaCover             func(childComplexity int, mediaID string, url *string) int
-		SetPassword               func(childComplexity int, newPassword string) int
-		SetSourcePreference       func(childComplexity int, extensionID string, key string, value string) int
-		StartDownloader           func(childComplexity int) int
-		StartLibraryUpdate        func(childComplexity int, folderID *string) int
-		StopDownloader            func(childComplexity int) int
-		SyncChapters              func(childComplexity int, mediaID string) int
-		SyncRepositories          func(childComplexity int) int
-		SyncRepository            func(childComplexity int, repositoryID string) int
-		TrackerLogin              func(childComplexity int, trackerKey string, token string) int
-		TrackerLogout             func(childComplexity int, trackerKey string) int
-		UnbindTrack               func(childComplexity int, linkID string) int
-		UninstallCloudflareSolver func(childComplexity int) int
-		UninstallExtension        func(childComplexity int, packageName string) int
-		UnlinkMetadata            func(childComplexity int, mediaID string) int
-		UpdateExtension           func(childComplexity int, packageName string) int
-		UpdateFolderFlags         func(childComplexity int, folderID string, includeInUpdate *bool, includeInDownload *bool) int
-		UpdateReadingProgress     func(childComplexity int, mediaID string, chapterID string, progress float64, completed *bool, positionSeconds *float64, durationSeconds *float64) int
-		UpdateServerSetting       func(childComplexity int, key string, value string) int
-		UpdateTrack               func(childComplexity int, linkID string, status *int32, score *float64, lastChapterRead *float64) int
+		AddContentFilterRule       func(childComplexity int, category string, field model.FilterField, keyword string, minWeight *int32, blockLevel model.ContentBlockLevel) int
+		AddMediaToFolder           func(childComplexity int, mediaID string, folderID string) int
+		AddRepository              func(childComplexity int, indexURL string, name *string) int
+		ApplyMetadataMatch         func(childComplexity int, mediaID string, providerID string, provider *string) int
+		BindTrack                  func(childComplexity int, mediaID string, trackerKey string, remoteID string) int
+		ClearDownloads             func(childComplexity int, status []model.DownloadStatus) int
+		ClearImageCache            func(childComplexity int) int
+		ClearStorageCategory       func(childComplexity int, key string) int
+		CreateDatabaseBackup       func(childComplexity int) int
+		CreateFolder               func(childComplexity int, name string, parentFolderID *string) int
+		CreateTrackerStub          func(childComplexity int, trackerKey string, remoteID string, contentType model.ContentType, title string, coverURL *string) int
+		DeleteDatabaseBackup       func(childComplexity int, name string) int
+		DeleteDownload             func(childComplexity int, mediaID string, chapterIds []string) int
+		DeleteFolder               func(childComplexity int, folderID string) int
+		DeleteLocalSeries          func(childComplexity int, mediaID string) int
+		DeleteRepository           func(childComplexity int, repositoryID string) int
+		DequeueDownload            func(childComplexity int, mediaID string, chapterID string) int
+		DisableServerAuth          func(childComplexity int) int
+		EnqueueDownload            func(childComplexity int, mediaID string, chapterIds []string) int
+		ExportMihonBackup          func(childComplexity int) int
+		ImportMihonBackup          func(childComplexity int, name string) int
+		InstallCloudflareSolver    func(childComplexity int) int
+		InstallExtension           func(childComplexity int, packageName string) int
+		InstallExternalExtension   func(childComplexity int, url string) int
+		MarkChapterRead            func(childComplexity int, mediaID string, chapterID string) int
+		MarkChaptersRead           func(childComplexity int, mediaID string, chapterIds []string, read bool) int
+		MigrateMangaDownloadFormat func(childComplexity int, target string) int
+		MigrateMedia               func(childComplexity int, fromMediaID string, toExtensionID string, toExternalID string) int
+		PullTracker                func(childComplexity int, mediaID string) int
+		RecomputeContentFilter     func(childComplexity int) int
+		RefetchMediaCover          func(childComplexity int, mediaID string) int
+		RefreshFolder              func(childComplexity int, folderID string) int
+		RefreshMetadata            func(childComplexity int, mediaID string, syncChapters *bool) int
+		RefreshMetadataMatch       func(childComplexity int, mediaID string) int
+		RelocateDownloads          func(childComplexity int, newPath string, migrate bool) int
+		RelocateLocalSource        func(childComplexity int, newPath string, migrate bool) int
+		RemoveContentFilterRule    func(childComplexity int, id string) int
+		RemoveMediaFromFolder      func(childComplexity int, mediaID string, folderID string) int
+		RenameFolder               func(childComplexity int, folderID string, name string) int
+		RenameRepository           func(childComplexity int, repositoryID string, name string) int
+		ReorderDownload            func(childComplexity int, mediaID string, chapterID string, position int32) int
+		ReorderFolder              func(childComplexity int, folderID string, sortOrder int32) int
+		RescanLocalMedia           func(childComplexity int) int
+		ResetContentFilterRules    func(childComplexity int) int
+		ResyncTrack                func(childComplexity int, linkID string) int
+		RetryDownload              func(childComplexity int, mediaID string, chapterID string) int
+		SetInLibrary               func(childComplexity int, mediaID string, inLibrary bool) int
+		SetMediaCover              func(childComplexity int, mediaID string, url *string) int
+		SetPassword                func(childComplexity int, newPassword string) int
+		SetSourcePreference        func(childComplexity int, extensionID string, key string, value string) int
+		StartDownloader            func(childComplexity int) int
+		StartLibraryUpdate         func(childComplexity int, folderID *string) int
+		StopDownloader             func(childComplexity int) int
+		SyncChapters               func(childComplexity int, mediaID string) int
+		SyncRepositories           func(childComplexity int) int
+		SyncRepository             func(childComplexity int, repositoryID string) int
+		TrackerLogin               func(childComplexity int, trackerKey string, token string) int
+		TrackerLogout              func(childComplexity int, trackerKey string) int
+		UnbindTrack                func(childComplexity int, linkID string) int
+		UninstallCloudflareSolver  func(childComplexity int) int
+		UninstallExtension         func(childComplexity int, packageName string) int
+		UnlinkMetadata             func(childComplexity int, mediaID string) int
+		UpdateExtension            func(childComplexity int, packageName string) int
+		UpdateFolderFlags          func(childComplexity int, folderID string, includeInUpdate *bool, includeInDownload *bool) int
+		UpdateReadingProgress      func(childComplexity int, mediaID string, chapterID string, progress float64, completed *bool, positionSeconds *float64, durationSeconds *float64) int
+		UpdateServerSetting        func(childComplexity int, key string, value string) int
+		UpdateTrack                func(childComplexity int, linkID string, status *int32, score *float64, lastChapterRead *float64) int
 	}
 
 	Query struct {
@@ -623,6 +630,7 @@ type MediaResolver interface {
 	TrackLinks(ctx context.Context, obj *model.Media) ([]*model.TrackLink, error)
 	Metadata(ctx context.Context, obj *model.Media) (*model.MetadataMatch, error)
 	Source(ctx context.Context, obj *model.Media) (*model.Extension, error)
+	DownloadFolderPath(ctx context.Context, obj *model.Media) (*string, error)
 }
 type MetadataMatchResolver interface {
 	MalID(ctx context.Context, obj *model.MetadataMatch) (*int32, error)
@@ -673,6 +681,7 @@ type MutationResolver interface {
 	ClearStorageCategory(ctx context.Context, key string) (*model.StorageInfo, error)
 	RelocateDownloads(ctx context.Context, newPath string, migrate bool) (*model.RelocateDownloadsResult, error)
 	RelocateLocalSource(ctx context.Context, newPath string, migrate bool) (*model.RelocateLocalSourceResult, error)
+	MigrateMangaDownloadFormat(ctx context.Context, target string) (*model.MigrateMangaFormatResult, error)
 	CreateDatabaseBackup(ctx context.Context) (*model.DatabaseBackup, error)
 	DeleteDatabaseBackup(ctx context.Context, name string) (bool, error)
 	ExportMihonBackup(ctx context.Context) (*model.DatabaseBackup, error)
@@ -1462,6 +1471,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Media.DetailsFetchedAt(childComplexity), true
+	case "Media.downloadFolderPath":
+		if e.ComplexityRoot.Media.DownloadFolderPath == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Media.DownloadFolderPath(childComplexity), true
 	case "Media.downloadedCount":
 		if e.ComplexityRoot.Media.DownloadedCount == nil {
 			break
@@ -1736,6 +1751,19 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.MetadataMatch.URL(childComplexity), true
 
+	case "MigrateMangaFormatResult.chaptersMigrated":
+		if e.ComplexityRoot.MigrateMangaFormatResult.ChaptersMigrated == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MigrateMangaFormatResult.ChaptersMigrated(childComplexity), true
+	case "MigrateMangaFormatResult.pagesMigrated":
+		if e.ComplexityRoot.MigrateMangaFormatResult.PagesMigrated == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MigrateMangaFormatResult.PagesMigrated(childComplexity), true
+
 	case "Mutation.addContentFilterRule":
 		if e.ComplexityRoot.Mutation.AddContentFilterRule == nil {
 			break
@@ -1997,6 +2025,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.MarkChaptersRead(childComplexity, args["mediaId"].(string), args["chapterIds"].([]string), args["read"].(bool)), true
+	case "Mutation.migrateMangaDownloadFormat":
+		if e.ComplexityRoot.Mutation.MigrateMangaDownloadFormat == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_migrateMangaDownloadFormat_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.MigrateMangaDownloadFormat(childComplexity, args["target"].(string)), true
 	case "Mutation.migrateMedia":
 		if e.ComplexityRoot.Mutation.MigrateMedia == nil {
 			break
@@ -4070,6 +4109,8 @@ func (ec *executionContext) childFields_Media(ctx context.Context, field graphql
 		return ec.fieldContext_Media_metadata(ctx, field)
 	case "source":
 		return ec.fieldContext_Media_source(ctx, field)
+	case "downloadFolderPath":
+		return ec.fieldContext_Media_downloadFolderPath(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Media", field.Name)
 }
@@ -4134,6 +4175,16 @@ func (ec *executionContext) childFields_MetadataMatch(ctx context.Context, field
 		return ec.fieldContext_MetadataMatch_matchedAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type MetadataMatch", field.Name)
+}
+
+func (ec *executionContext) childFields_MigrateMangaFormatResult(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "chaptersMigrated":
+		return ec.fieldContext_MigrateMangaFormatResult_chaptersMigrated(ctx, field)
+	case "pagesMigrated":
+		return ec.fieldContext_MigrateMangaFormatResult_pagesMigrated(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type MigrateMangaFormatResult", field.Name)
 }
 
 func (ec *executionContext) childFields_ReadingProgress(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -5087,6 +5138,20 @@ func (ec *executionContext) field_Mutation_markChaptersRead_args(ctx context.Con
 		return nil, err
 	}
 	args["read"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_migrateMangaDownloadFormat_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "target",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["target"] = arg0
 	return args, nil
 }
 
@@ -9693,6 +9758,29 @@ func (ec *executionContext) fieldContext_Media_source(_ context.Context, field g
 	return fc, nil
 }
 
+func (ec *executionContext) _Media_downloadFolderPath(ctx context.Context, field graphql.CollectedField, obj *model.Media) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Media_downloadFolderPath(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Media().DownloadFolderPath(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Media_downloadFolderPath(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Media", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
 func (ec *executionContext) _MediaPage_items(ctx context.Context, field graphql.CollectedField, obj *model.MediaPage) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -10206,6 +10294,52 @@ func (ec *executionContext) _MetadataMatch_matchedAt(ctx context.Context, field 
 }
 func (ec *executionContext) fieldContext_MetadataMatch_matchedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("MetadataMatch", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _MigrateMangaFormatResult_chaptersMigrated(ctx context.Context, field graphql.CollectedField, obj *model.MigrateMangaFormatResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MigrateMangaFormatResult_chaptersMigrated(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ChaptersMigrated, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int32) graphql.Marshaler {
+			return ec.marshalNInt2int32(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MigrateMangaFormatResult_chaptersMigrated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MigrateMangaFormatResult", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _MigrateMangaFormatResult_pagesMigrated(ctx context.Context, field graphql.CollectedField, obj *model.MigrateMangaFormatResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MigrateMangaFormatResult_pagesMigrated(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.PagesMigrated, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int32) graphql.Marshaler {
+			return ec.marshalNInt2int32(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MigrateMangaFormatResult_pagesMigrated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MigrateMangaFormatResult", field, false, false, errors.New("field of type Int does not have child fields"))
 }
 
 func (ec *executionContext) _Mutation_createFolder(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
@@ -11988,6 +12122,50 @@ func (ec *executionContext) fieldContext_Mutation_relocateLocalSource(ctx contex
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_relocateLocalSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_migrateMangaDownloadFormat(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_migrateMangaDownloadFormat(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().MigrateMangaDownloadFormat(ctx, fc.Args["target"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *model.MigrateMangaFormatResult) graphql.Marshaler {
+			return ec.marshalNMigrateMangaFormatResult2ᚖtsunaguᚋbackendᚋinternalᚋapiᚋgraphᚋmodelᚐMigrateMangaFormatResult(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_migrateMangaDownloadFormat(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_MigrateMangaFormatResult(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_migrateMangaDownloadFormat_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -21267,6 +21445,44 @@ func (ec *executionContext) _Media(ctx context.Context, sel ast.SelectionSet, ob
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "downloadFolderPath":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Media_downloadFolderPath(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -21541,6 +21757,49 @@ func (ec *executionContext) _MetadataMatch(ctx context.Context, sel ast.Selectio
 			out.Values[i] = ec._MetadataMatch_matchedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var migrateMangaFormatResultImplementors = []string{"MigrateMangaFormatResult"}
+
+func (ec *executionContext) _MigrateMangaFormatResult(ctx context.Context, sel ast.SelectionSet, obj *model.MigrateMangaFormatResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, migrateMangaFormatResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("MigrateMangaFormatResult")
+		case "chaptersMigrated":
+			out.Values[i] = ec._MigrateMangaFormatResult_chaptersMigrated(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pagesMigrated":
+			out.Values[i] = ec._MigrateMangaFormatResult_pagesMigrated(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -21887,6 +22146,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "relocateLocalSource":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_relocateLocalSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "migrateMangaDownloadFormat":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_migrateMangaDownloadFormat(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -25457,6 +25723,20 @@ func (ec *executionContext) marshalNMetadataCandidate2ᚖtsunaguᚋbackendᚋint
 		return graphql.Null
 	}
 	return ec._MetadataCandidate(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNMigrateMangaFormatResult2tsunaguᚋbackendᚋinternalᚋapiᚋgraphᚋmodelᚐMigrateMangaFormatResult(ctx context.Context, sel ast.SelectionSet, v model.MigrateMangaFormatResult) graphql.Marshaler {
+	return ec._MigrateMangaFormatResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNMigrateMangaFormatResult2ᚖtsunaguᚋbackendᚋinternalᚋapiᚋgraphᚋmodelᚐMigrateMangaFormatResult(ctx context.Context, sel ast.SelectionSet, v *model.MigrateMangaFormatResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._MigrateMangaFormatResult(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNReadingProgress2tsunaguᚋbackendᚋinternalᚋapiᚋgraphᚋmodelᚐReadingProgress(ctx context.Context, sel ast.SelectionSet, v model.ReadingProgress) graphql.Marshaler {

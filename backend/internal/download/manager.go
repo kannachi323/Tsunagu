@@ -1,6 +1,7 @@
 package download
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"tsunagu/backend/internal/db/sqlcgen"
+	"tsunagu/backend/internal/localsource"
 	"tsunagu/backend/internal/sandbox"
 )
 
@@ -33,6 +35,9 @@ type Manager struct {
 
 	dirMu        sync.RWMutex
 	downloadsDir string
+
+	formatMu    sync.RWMutex
+	imageFormat string
 
 	pollInterval time.Duration
 	workers      int
@@ -47,15 +52,19 @@ type Manager struct {
 	paused   bool
 }
 
-func New(q *sqlcgen.Queries, sc *sandbox.SupervisedClient, mediaDir, downloadsDir string) *Manager {
+func New(q *sqlcgen.Queries, sc *sandbox.SupervisedClient, mediaDir, downloadsDir, imageFormat string) *Manager {
 	if strings.TrimSpace(downloadsDir) == "" {
 		downloadsDir = mediaDir
+	}
+	if imageFormat != "cbz" {
+		imageFormat = "loose"
 	}
 	return &Manager{
 		q:            q,
 		sc:           sc,
 		mediaDir:     mediaDir,
 		downloadsDir: downloadsDir,
+		imageFormat:  imageFormat,
 		pollInterval: 2 * time.Second,
 		workers:      2,
 		wakeCh:       make(chan struct{}, 1),
@@ -225,6 +234,21 @@ func (m *Manager) SetDownloadsDir(dir string) {
 	m.dirMu.Unlock()
 }
 
+func (m *Manager) ImageFormat() string {
+	m.formatMu.RLock()
+	defer m.formatMu.RUnlock()
+	return m.imageFormat
+}
+
+func (m *Manager) SetImageFormat(format string) {
+	if format != "cbz" {
+		format = "loose"
+	}
+	m.formatMu.Lock()
+	m.imageFormat = format
+	m.formatMu.Unlock()
+}
+
 func (m *Manager) buildChapterDir(dctx sqlcgen.GetChapterDownloadContextRow) string {
 	return filepath.Join(
 		m.DownloadsDir(),
@@ -256,6 +280,10 @@ func (m *Manager) downloadManga(ctx context.Context, jobID int64, client *sandbo
 	urls := pages.GetPageUrls()
 	if len(urls) == 0 {
 		return fmt.Errorf("source returned no pages")
+	}
+
+	if m.ImageFormat() == "cbz" {
+		return m.downloadMangaCBZ(ctx, jobID, client, dctx, urls)
 	}
 
 	chapterDir := m.buildChapterDir(dctx)
@@ -292,6 +320,82 @@ func (m *Manager) downloadManga(ctx context.Context, jobID int64, client *sandbo
 			ID:       jobID,
 		}); err != nil {
 			log.Printf("download: progress update failed for job %d: %v", jobID, err)
+		}
+	}
+
+	return nil
+}
+
+func (m *Manager) downloadMangaCBZ(ctx context.Context, jobID int64, client *sandbox.Client, dctx sqlcgen.GetChapterDownloadContextRow, urls []string) error {
+	chapterDir := m.buildChapterDir(dctx)
+	if err := os.MkdirAll(filepath.Dir(chapterDir), 0o755); err != nil {
+		return fmt.Errorf("creating chapter parent dir: %w", err)
+	}
+	archivePath := chapterDir + ".cbz"
+	tmpPath := archivePath + ".part"
+
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("creating archive: %w", err)
+	}
+	zw := zip.NewWriter(f)
+
+	total := len(urls)
+	entries := make([]string, total)
+	for i, pageURL := range urls {
+		img, err := client.GetImageBytes(ctx, dctx.ExtensionPackageName, pageURL)
+		if err != nil {
+			zw.Close()
+			f.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("fetching page %d: %w", i+1, err)
+		}
+
+		entryName := fmt.Sprintf("%03d%s", i+1, extFromContentType(img.GetContentType()))
+		entries[i] = entryName
+		// Images are already compressed formats, so deflating them again just
+		// burns CPU for no space savings; store them uncompressed instead.
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: entryName, Method: zip.Store})
+		if err == nil {
+			_, err = w.Write(img.GetData())
+		}
+		if err != nil {
+			zw.Close()
+			f.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("packing page %d: %w", i+1, err)
+		}
+
+		progress := float64(i+1) / float64(total)
+		if err := m.q.UpdateDownloadProgress(ctx, sqlcgen.UpdateDownloadProgressParams{
+			Status:   "downloading",
+			Progress: progress,
+			ID:       jobID,
+		}); err != nil {
+			log.Printf("download: progress update failed for job %d: %v", jobID, err)
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing archive: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing archive: %w", err)
+	}
+	if err := os.Rename(tmpPath, archivePath); err != nil {
+		return fmt.Errorf("finalizing archive: %w", err)
+	}
+
+	for i, entryName := range entries {
+		if err := m.q.UpsertMangaPage(ctx, sqlcgen.UpsertMangaPageParams{
+			ChapterID:  dctx.ChapterID,
+			PageNumber: int64(i + 1),
+			LocalPath:  sql.NullString{String: localsource.ZipPagePath(archivePath, entryName), Valid: true},
+		}); err != nil {
+			return fmt.Errorf("recording page %d: %w", i+1, err)
 		}
 	}
 
@@ -806,6 +910,8 @@ func (m *Manager) discardPartial(chapterID int64) {
 	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("download: cleanup: removing %s: %v", dir, err)
 	}
+	_ = os.Remove(dir + ".cbz")
+	_ = os.Remove(dir + ".cbz.part")
 	m.removeEmptyDirs(filepath.Dir(dir))
 	_ = m.q.DeleteMangaPages(ctx, chapterID)
 	_ = m.q.DeleteNovelChapterContent(ctx, chapterID)
@@ -891,14 +997,29 @@ func (m *Manager) DeleteChapterFiles(ctx context.Context, chapterID int64) error
 			return fmt.Errorf("listing manga pages: %w", err)
 		}
 		var chapterDir string
+		removedArchives := map[string]bool{}
 		for _, p := range pages {
-			if p.LocalPath.Valid {
+			if !p.LocalPath.Valid {
+				continue
+			}
+			if archivePath, _, ok := localsource.ParseZipPagePath(p.LocalPath.String); ok {
 				if chapterDir == "" {
-					chapterDir = filepath.Dir(p.LocalPath.String)
+					chapterDir = filepath.Dir(archivePath)
 				}
-				if err := os.Remove(p.LocalPath.String); err != nil && !os.IsNotExist(err) {
-					log.Printf("download: failed removing page file %s: %v", p.LocalPath.String, err)
+				if removedArchives[archivePath] {
+					continue
 				}
+				removedArchives[archivePath] = true
+				if err := os.Remove(archivePath); err != nil && !os.IsNotExist(err) {
+					log.Printf("download: failed removing archive %s: %v", archivePath, err)
+				}
+				continue
+			}
+			if chapterDir == "" {
+				chapterDir = filepath.Dir(p.LocalPath.String)
+			}
+			if err := os.Remove(p.LocalPath.String); err != nil && !os.IsNotExist(err) {
+				log.Printf("download: failed removing page file %s: %v", p.LocalPath.String, err)
 			}
 		}
 		if chapterDir != "" {
@@ -946,6 +1067,13 @@ func (m *Manager) DeleteChapterFiles(ctx context.Context, chapterID int64) error
 
 	default:
 		return fmt.Errorf("unsupported content type for delete: %s", dctx.ContentType)
+	}
+
+	// The job-history row would otherwise still say status "done" forever,
+	// making downloadedCount (and anything derived from it) permanently
+	// stale once the actual files are gone.
+	if err := m.q.DeleteDownloadByChapter(ctx, chapterID); err != nil {
+		log.Printf("download: failed clearing job row for chapter %d: %v", chapterID, err)
 	}
 
 	return nil

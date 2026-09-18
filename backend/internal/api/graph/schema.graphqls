@@ -135,6 +135,7 @@ type Media {
   trackLinks: [TrackLink!]! @goField(forceResolver: true)
   metadata: MetadataMatch @goField(forceResolver: true)
   source: Extension @goField(forceResolver: true)
+  downloadFolderPath: String @goField(forceResolver: true)
 }
 
 type MetadataMatch {
@@ -369,6 +370,11 @@ type RelocateLocalSourceResult {
   movedBytes: Float!
 }
 
+type MigrateMangaFormatResult {
+  chaptersMigrated: Int!
+  pagesMigrated: Int!
+}
+
 type StorageCategory {
   key: String!
   label: String!
@@ -561,6 +567,7 @@ type Mutation {
   clearStorageCategory(key: String!): StorageInfo!
   relocateDownloads(newPath: String!, migrate: Boolean!): RelocateDownloadsResult!
   relocateLocalSource(newPath: String!, migrate: Boolean!): RelocateLocalSourceResult!
+  migrateMangaDownloadFormat(target: String!): MigrateMangaFormatResult!
   createDatabaseBackup: DatabaseBackup!
   deleteDatabaseBackup(name: String!): Boolean!
 

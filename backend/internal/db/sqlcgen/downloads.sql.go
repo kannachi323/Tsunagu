@@ -56,6 +56,11 @@ FROM downloads d
 JOIN chapters c ON c.id = d.chapter_id
 WHERE c.media_id IN (/*SLICE:media_ids*/?)
   AND d.status = 'done'
+  AND (
+    EXISTS (SELECT 1 FROM manga_pages mp WHERE mp.chapter_id = c.id AND mp.local_path IS NOT NULL AND mp.local_path != '')
+    OR EXISTS (SELECT 1 FROM novel_chapter_content nc WHERE nc.chapter_id = c.id AND nc.local_path IS NOT NULL AND nc.local_path != '')
+    OR EXISTS (SELECT 1 FROM anime_episode_streams a WHERE a.chapter_id = c.id AND a.local_path IS NOT NULL AND a.local_path != '')
+  )
 GROUP BY c.media_id
 `
 
@@ -64,6 +69,8 @@ type CountDownloadedChaptersByMediaIDsRow struct {
 	DownloadCount int64 `json:"download_count"`
 }
 
+// Requires actual current file presence, not just a job row that once said
+// "done" -- otherwise deleted/relocated downloads stay counted forever.
 func (q *Queries) CountDownloadedChaptersByMediaIDs(ctx context.Context, mediaIds []int64) ([]CountDownloadedChaptersByMediaIDsRow, error) {
 	query := countDownloadedChaptersByMediaIDs
 	var queryParams []interface{}

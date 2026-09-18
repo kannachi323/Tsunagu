@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"tsunagu/backend/internal/backup"
 	"tsunagu/backend/internal/db/sqlcgen"
 	"tsunagu/backend/internal/image"
+	"tsunagu/backend/internal/localsource"
 	"tsunagu/backend/internal/metadata"
 	"tsunagu/backend/internal/sandbox"
 	sandboxv1 "tsunagu/backend/internal/sandbox/gen/sandbox/v1"
@@ -323,6 +325,55 @@ func (r *mediaResolver) Source(ctx context.Context, obj *model.Media) (*model.Ex
 		return nil, err
 	}
 	return toExtension(*ext, r.MediaDir), nil
+}
+
+func (r *mediaResolver) DownloadFolderPath(ctx context.Context, obj *model.Media) (*string, error) {
+	id, err := parseID(obj.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	logIfUnexpected := func(qerr error) {
+		if qerr != nil && qerr != sql.ErrNoRows {
+			log.Printf("DownloadFolderPath: media %d: %v", id, qerr)
+		}
+	}
+
+	var localPath string
+	switch obj.ContentType {
+	case model.ContentTypeManga:
+		lp, qerr := r.Q.GetAnyDownloadedMangaPathForMedia(ctx, id)
+		if qerr != nil || !lp.Valid {
+			logIfUnexpected(qerr)
+			return nil, nil
+		}
+		if archivePath, _, ok := localsource.ParseZipPagePath(lp.String); ok {
+			folder := filepath.Dir(archivePath)
+			return &folder, nil
+		}
+		localPath = lp.String
+		folder := filepath.Dir(filepath.Dir(localPath))
+		return &folder, nil
+	case model.ContentTypeNovel:
+		lp, qerr := r.Q.GetAnyDownloadedNovelPathForMedia(ctx, id)
+		if qerr != nil || !lp.Valid {
+			logIfUnexpected(qerr)
+			return nil, nil
+		}
+		localPath = lp.String
+	case model.ContentTypeAnime:
+		lp, qerr := r.Q.GetAnyDownloadedAnimePathForMedia(ctx, id)
+		if qerr != nil || !lp.Valid {
+			logIfUnexpected(qerr)
+			return nil, nil
+		}
+		localPath = lp.String
+	default:
+		return nil, nil
+	}
+
+	folder := filepath.Dir(localPath)
+	return &folder, nil
 }
 
 func (r *metadataMatchResolver) MalID(ctx context.Context, obj *model.MetadataMatch) (*int32, error) {
@@ -1052,6 +1103,17 @@ func (r *mutationResolver) RelocateLocalSource(ctx context.Context, newPath stri
 		Migrated:   migrate,
 		MovedFiles: int32(res.MovedFiles),
 		MovedBytes: float64(res.MovedBytes),
+	}, nil
+}
+
+func (r *mutationResolver) MigrateMangaDownloadFormat(ctx context.Context, target string) (*model.MigrateMangaFormatResult, error) {
+	res, err := r.Dm.MigrateMangaFormat(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	return &model.MigrateMangaFormatResult{
+		ChaptersMigrated: int32(res.ChaptersMigrated),
+		PagesMigrated:    int32(res.PagesMigrated),
 	}, nil
 }
 

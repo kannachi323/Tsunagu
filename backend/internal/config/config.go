@@ -39,6 +39,7 @@ type Config struct {
 	CloudflareSolverMode string
 	CloudflareSolverURL  string
 	ContentFilterLevel   string
+	MangaDownloadFormat  string
 }
 
 func (c *Config) IdleTimeout() time.Duration {
@@ -71,6 +72,7 @@ func Defaults() Config {
 		CloudflareSolverMode: "disabled",
 		CloudflareSolverURL:  "http://127.0.0.1:8191",
 		ContentFilterLevel:   "moderate",
+		MangaDownloadFormat:  "loose",
 	}
 }
 
