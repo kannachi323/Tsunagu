@@ -44,7 +44,7 @@ func (h *IconProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	destName := strconv.FormatInt(extID, 10)
-	localPath, err := image.DownloadToFile(ext.IconUrl.String, h.IconCacheDir, destName)
+	localPath, err := image.DownloadToFileContext(r.Context(), ext.IconUrl.String, h.IconCacheDir, destName)
 	if err != nil {
 		http.Error(w, "fetching icon failed", http.StatusBadGateway)
 		return

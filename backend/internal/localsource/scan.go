@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tsunagu/backend/internal/taskgroup"
 	"unicode"
 
 	"tsunagu/backend/internal/db/sqlcgen"
@@ -23,6 +24,7 @@ type Enricher interface {
 }
 
 type Scanner struct {
+	Work     *taskgroup.Group
 	q        *sqlcgen.Queries
 	mediaDir string
 	enricher Enricher
@@ -32,7 +34,7 @@ type Scanner struct {
 }
 
 func New(q *sqlcgen.Queries, mediaDir string) *Scanner {
-	return &Scanner{q: q, mediaDir: mediaDir}
+	return &Scanner{Work: taskgroup.New(), q: q, mediaDir: mediaDir}
 }
 
 // SetEnricher wires a metadata provider that newly-discovered local titles
@@ -346,13 +348,13 @@ func (s *Scanner) upsertMedia(ctx context.Context, externalID, ct, title, cover 
 // maybeEnrich runs a best-effort metadata auto-match for a newly-discovered
 // local title in the background, so scanning doesn't block on network calls.
 func (s *Scanner) maybeEnrich(mediaID int64) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	s.Work.Go(func() {
+		ctx, cancel := context.WithTimeout(s.Work.Context, 15*time.Second)
 		defer cancel()
 		if err := s.enricher.AutoEnrich(ctx, mediaID); err != nil {
 			log.Printf("localsource: metadata auto-enrich for media %d: %v", mediaID, err)
 		}
-	}()
+	})
 }
 
 func gone(path string) bool {

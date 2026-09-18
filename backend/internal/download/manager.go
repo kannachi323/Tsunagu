@@ -28,10 +28,20 @@ import (
 	"tsunagu/backend/internal/sandbox"
 )
 
+type runningJob struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 type Manager struct {
-	q        *sqlcgen.Queries
-	sc       *sandbox.SupervisedClient
-	mediaDir string
+	OnComplete  func(int64)
+	videoEngine VideoDownloadEngine
+	lifecycle   context.Context
+	interrupt   context.CancelFunc
+	stopOnce    sync.Once
+	q           *sqlcgen.Queries
+	sc          *sandbox.SupervisedClient
+	mediaDir    string
 
 	dirMu        sync.RWMutex
 	downloadsDir string
@@ -46,7 +56,7 @@ type Manager struct {
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
 	runningMu sync.Mutex
-	running   map[int64]context.CancelFunc
+	running   map[int64]*runningJob
 
 	pausedMu sync.RWMutex
 	paused   bool
@@ -59,7 +69,8 @@ func New(q *sqlcgen.Queries, sc *sandbox.SupervisedClient, mediaDir, downloadsDi
 	if imageFormat != "cbz" {
 		imageFormat = "loose"
 	}
-	return &Manager{
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Manager{lifecycle: ctx, interrupt: cancel,
 		q:            q,
 		sc:           sc,
 		mediaDir:     mediaDir,
@@ -69,7 +80,7 @@ func New(q *sqlcgen.Queries, sc *sandbox.SupervisedClient, mediaDir, downloadsDi
 		workers:      2,
 		wakeCh:       make(chan struct{}, 1),
 		stopCh:       make(chan struct{}),
-		running:      make(map[int64]context.CancelFunc),
+		running:      make(map[int64]*runningJob),
 	}
 }
 
@@ -85,7 +96,7 @@ func (m *Manager) Start() {
 }
 
 func (m *Manager) Shutdown() {
-	close(m.stopCh)
+	m.stopOnce.Do(func() { m.interrupt(); close(m.stopCh) })
 	m.wg.Wait()
 }
 
@@ -117,7 +128,7 @@ func (m *Manager) workerLoop() {
 }
 
 func (m *Manager) processOne() {
-	ctx := context.Background()
+	ctx := m.lifecycle
 
 	jobs, err := m.q.ListQueuedDownloads(ctx)
 	if err != nil {
@@ -129,22 +140,21 @@ func (m *Manager) processOne() {
 	}
 	job := jobs[0]
 
-	if err := m.q.UpdateDownloadProgress(ctx, sqlcgen.UpdateDownloadProgressParams{
-		Status:   "downloading",
-		Progress: 0,
-		ID:       job.ID,
-	}); err != nil {
-		log.Printf("download: claim job %d failed: %v", job.ID, err)
+	m.runningMu.Lock()
+	claimed, err := m.q.ClaimDownload(ctx, job.ID)
+	if err != nil || !claimed {
+		m.runningMu.Unlock()
 		return
 	}
 
 	jobCtx, cancel := context.WithCancel(ctx)
-	m.runningMu.Lock()
-	m.running[job.ChapterID] = cancel
+	active := &runningJob{cancel: cancel, done: make(chan struct{})}
+	m.running[job.ChapterID] = active
 	m.runningMu.Unlock()
 	defer func() {
 		m.runningMu.Lock()
 		delete(m.running, job.ChapterID)
+		close(active.done)
 		m.runningMu.Unlock()
 		cancel()
 	}()
@@ -154,7 +164,11 @@ func (m *Manager) processOne() {
 
 		log.Printf("download: job %d (chapter %d) cancelled; discarding partial output", job.ID, job.ChapterID)
 		m.discardPartial(job.ChapterID)
-		_ = m.q.DeleteDownloadByChapter(context.Background(), job.ChapterID)
+		if m.lifecycle.Err() != nil {
+			_ = m.q.UpdateDownloadProgress(context.Background(), sqlcgen.UpdateDownloadProgressParams{Status: "queued", ID: job.ID})
+		} else {
+			_ = m.q.DeleteDownloadByChapter(context.Background(), job.ChapterID)
+		}
 		return
 	}
 	if err != nil {
@@ -169,6 +183,8 @@ func (m *Manager) processOne() {
 
 	if err := m.q.CompleteDownload(ctx, job.ID); err != nil {
 		log.Printf("download: mark complete failed for job %d: %v", job.ID, err)
+	} else if m.OnComplete != nil {
+		m.OnComplete(job.ChapterID)
 	}
 }
 
@@ -534,6 +550,30 @@ func (m *Manager) downloadAnime(ctx context.Context, jobID int64, client *sandbo
 		return fmt.Errorf("creating chapter dir: %w", err)
 	}
 	outputPath := filepath.Join(chapterDir, "episode.mp4")
+	if m.videoEngine != nil {
+		temporary := outputPath + ".partial.mp4"
+		defer os.Remove(temporary)
+		err := m.videoEngine.Download(ctx, VideoRequest{URL: streamURL, Headers: stream.GetHeaders(), OutputPath: temporary}, func(p VideoProgress) {
+			_ = m.q.UpdateDownloadStats(ctx, sqlcgen.UpdateDownloadStatsParams{ID: jobID, Status: "downloading", Progress: math.Min(.99, math.Max(0, p.Fraction)), DownloadedBytes: sql.NullInt64{Int64: p.Bytes, Valid: true}, BytesPerSec: sql.NullFloat64{Float64: p.BytesPerSecond, Valid: true}})
+		})
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		info, err := os.Stat(temporary)
+		if err != nil {
+			return err
+		}
+		if info.Size() == 0 {
+			return fmt.Errorf("native engine produced empty output")
+		}
+		if err := os.Rename(temporary, outputPath); err != nil {
+			return err
+		}
+		return m.q.UpsertAnimeEpisodeStream(ctx, sqlcgen.UpsertAnimeEpisodeStreamParams{ChapterID: dctx.ChapterID, StreamUrl: sql.NullString{String: streamURL, Valid: true}, LocalPath: sql.NullString{String: outputPath, Valid: true}})
+	}
 
 	keepaliveCtx, stopKeepalive := context.WithCancel(ctx)
 	defer stopKeepalive()
@@ -891,12 +931,22 @@ func parseInt64(s string) (int64, error) {
 
 func (m *Manager) Cancel(ctx context.Context, chapterID int64) error {
 	m.runningMu.Lock()
-	cancel, ok := m.running[chapterID]
-	m.runningMu.Unlock()
-	if ok {
-		cancel()
+	active, ok := m.running[chapterID]
+	if !ok {
+		// Delete while holding the claim lock, so a queued job cannot start between
+		// cancellation and the caller's file cleanup.
+		err := m.q.DeleteDownloadByChapter(ctx, chapterID)
+		m.runningMu.Unlock()
+		return err
 	}
-	return nil
+	active.cancel()
+	m.runningMu.Unlock()
+	select {
+	case <-active.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (m *Manager) discardPartial(chapterID int64) {

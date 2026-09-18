@@ -42,7 +42,7 @@ object SourceErrors {
             return when {
                 code == 404 || code == 410 -> NOT_FOUND to "The source returned $code (entry or endpoint missing)."
                 code == 429 -> RATE_LIMITED to "The source is rate-limiting requests (429). Try again later."
-                code == 403 -> CLOUDFLARE to "The source returned 403 (likely bot protection)."
+                code == 403 -> UNAVAILABLE to "The source denied this request (HTTP 403)."
                 code in 500..599 -> UNAVAILABLE to "The source is temporarily unavailable (HTTP $code)."
                 else -> UNAVAILABLE to "The source request failed (HTTP $code)."
             }

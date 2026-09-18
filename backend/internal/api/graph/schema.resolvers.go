@@ -8,6 +8,7 @@ package graph
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -440,19 +441,14 @@ func (r *mutationResolver) MarkChaptersRead(ctx context.Context, mediaID string,
 		if err != nil {
 			return nil, err
 		}
-		row, err := r.Q.UpsertReadingProgress(ctx, sqlcgen.UpsertReadingProgressParams{
-			MediaID:   mID,
-			ChapterID: chID,
-			Completed: read,
-			Progress:  progress,
-		})
+		row, err := r.Sy.RecordProgress(ctx, mID, chID, progress, read, nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, toReadingProgress(row))
 	}
 	if read {
-		go r.Tk.SyncMediaProgress(context.Background(), mID)
+		r.background(func(ctx context.Context) { r.Tk.SyncMediaProgress(ctx, mID) })
 	}
 	return results, nil
 }
@@ -564,7 +560,7 @@ func (r *mutationResolver) ResetContentFilterRules(ctx context.Context) (bool, e
 }
 
 func (r *mutationResolver) RecomputeContentFilter(ctx context.Context) (bool, error) {
-	go func() { _ = r.Cf.RecomputeAll(context.Background()) }()
+	r.background(func(ctx context.Context) { _ = r.Cf.RecomputeAll(ctx) })
 	return true, nil
 }
 
@@ -601,7 +597,25 @@ func (r *mutationResolver) SetSourcePreference(ctx context.Context, extensionID 
 	return toSourcePreferences(resp.GetPreferences()), nil
 }
 
-func (r *mutationResolver) InstallExtension(ctx context.Context, packageName string) (*model.Extension, error) {
+func (r *mutationResolver) InstallExtension(ctx context.Context, packageName string) (result *model.Extension, err error) {
+	if r.Sc.IsEmbedded() {
+		previous, lookupErr := r.Q.GetExtensionByPackageName(ctx, packageName)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		defer func() {
+			if err == nil {
+				return
+			}
+			// Downloading alone does not constitute a usable mobile install.
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_, restoreErr := r.DB.ExecContext(cleanup,
+				"UPDATE extensions SET installed=?, jar_path=?, installed_version=?, installed_at=? WHERE id=?",
+				previous.Installed, previous.JarPath, previous.InstalledVersion, previous.InstalledAt, previous.ID)
+			err = errors.Join(err, restoreErr)
+		}()
+	}
 	ext, err := r.Sy.InstallExtension(ctx, packageName)
 	if err != nil {
 		return nil, err
@@ -618,6 +632,9 @@ func (r *mutationResolver) InstallExtension(ctx context.Context, packageName str
 	}})
 	if err != nil {
 		return nil, err
+	}
+	if r.Sc.IsEmbedded() && len(loaded.GetExtensions()) == 0 {
+		return nil, fmt.Errorf("sandbox did not load extension %s", packageName)
 	}
 	ext = r.persistSupportsLatest(ctx, ext, loaded)
 	return toExtension(ext, r.MediaDir), nil
@@ -681,7 +698,11 @@ func (r *mutationResolver) SetInLibrary(ctx context.Context, mediaID string, inL
 		return nil, err
 	}
 	var c *sandbox.Client
-	if inLibrary {
+	entry, err := r.Q.GetMedia(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inLibrary && !entry.DetailsFetchedAt.Valid && entry.ExtensionID.Valid {
 		c, err = r.Sc.Ensure(ctx)
 		if err != nil {
 			return nil, err
@@ -724,9 +745,9 @@ func (r *mutationResolver) MigrateMedia(ctx context.Context, fromMediaID string,
 	}
 
 	if r.Md != nil {
-		go r.Md.AutoEnrich(context.Background(), m.ID)
+		r.background(func(ctx context.Context) { _ = r.Md.AutoEnrich(ctx, m.ID) })
 	}
-	go r.Tk.SyncMediaProgress(context.Background(), m.ID)
+	r.background(func(ctx context.Context) { r.Tk.SyncMediaProgress(ctx, m.ID) })
 
 	return toMedia(m, r.MediaDir), nil
 }
@@ -769,7 +790,7 @@ func (r *mutationResolver) UpdateReadingProgress(ctx context.Context, mediaID st
 		return nil, err
 	}
 	if comp {
-		go r.Tk.SyncMediaProgress(context.Background(), mID)
+		r.background(func(ctx context.Context) { r.Tk.SyncMediaProgress(ctx, mID) })
 	}
 	return toReadingProgress(prog), nil
 }
@@ -787,7 +808,7 @@ func (r *mutationResolver) MarkChapterRead(ctx context.Context, mediaID string, 
 	if err != nil {
 		return nil, err
 	}
-	go r.Tk.SyncMediaProgress(context.Background(), mID)
+	r.background(func(ctx context.Context) { r.Tk.SyncMediaProgress(ctx, mID) })
 	return toReadingProgress(prog), nil
 }
 
@@ -996,6 +1017,9 @@ func (r *mutationResolver) UpdateFolderFlags(ctx context.Context, folderID strin
 }
 
 func (r *mutationResolver) ClearImageCache(ctx context.Context) (bool, error) {
+	if r.ClearMemoryImages != nil {
+		r.ClearMemoryImages()
+	}
 	if err := image.ClearDir(filepath.Join(r.MediaDir, "icons")); err != nil {
 		return false, fmt.Errorf("clearing icon cache: %w", err)
 	}
@@ -1694,7 +1718,7 @@ func (r *queryResolver) Media(ctx context.Context, id string) (*model.Media, err
 		return nil, err
 	}
 	// Overlaps with the Chapters field resolver's own EnsureChapters call instead of stacking after it.
-	go func() { _, _ = r.Sy.EnsureChapters(context.Background(), r.Sc, mid) }()
+	r.background(func(ctx context.Context) { _, _ = r.Sy.EnsureChapters(ctx, r.Sc, mid) })
 
 	m, err := r.Sy.EnsureHydrated(ctx, r.Sc, mid)
 	if err != nil {

@@ -74,6 +74,10 @@ class NetworkHelper {
                         ),
                     )
                     .addInterceptor(UncaughtExceptionInterceptor())
+                    .addNetworkInterceptor { chain ->
+                        val agent = cookieStore.userAgent(chain.request().url)
+                        chain.proceed(if (agent.isNullOrEmpty()) chain.request() else chain.request().newBuilder().header("User-Agent", agent).build())
+                    }
                     .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
 
             val httpLoggingInterceptor =

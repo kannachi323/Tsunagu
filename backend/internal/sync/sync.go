@@ -21,13 +21,17 @@ import (
 	"tsunagu/backend/internal/repository"
 	"tsunagu/backend/internal/sandbox"
 	sandboxv1 "tsunagu/backend/internal/sandbox/gen/sandbox/v1"
+	"tsunagu/backend/internal/taskgroup"
 )
 
 type Syncer struct {
-	db       *sql.DB
-	q        *sqlcgen.Queries
-	cacheDir string
-	mediaDir string
+	OnProgress    func(context.Context, int64, int64, bool) error
+	OnNewChapters func(context.Context, int64, []int64) error
+	Work          *taskgroup.Group
+	db            *sql.DB
+	q             *sqlcgen.Queries
+	cacheDir      string
+	mediaDir      string
 
 	installMu sync.Mutex
 	locks     map[string]*sync.Mutex
@@ -51,7 +55,7 @@ func (s *Syncer) SetEnricher(e Enricher)     { s.enricher = e }
 func (s *Syncer) SetRecomputer(r Recomputer) { s.recompute = r }
 
 func New(db *sql.DB, q *sqlcgen.Queries, cacheDir, mediaDir string) *Syncer {
-	return &Syncer{db: db, q: q, cacheDir: cacheDir, mediaDir: mediaDir, locks: make(map[string]*sync.Mutex)}
+	return &Syncer{Work: taskgroup.New(), db: db, q: q, cacheDir: cacheDir, mediaDir: mediaDir, locks: make(map[string]*sync.Mutex)}
 }
 
 type LibraryUpdateProgress struct {
@@ -84,12 +88,12 @@ func (s *Syncer) StartLibraryUpdate(sc *sandbox.SupervisedClient, folderID *int6
 	var err error
 	if folderID != nil {
 		var rows []sqlcgen.Medium
-		rows, err = s.q.ListMediaInFolder(context.Background(), *folderID)
+		rows, err = s.q.ListMediaInFolder(s.Work.Context, *folderID)
 		for _, m := range rows {
 			ids = append(ids, m.ID)
 		}
 	} else {
-		ids, err = s.q.ListUpdateTargetMediaIDs(context.Background())
+		ids, err = s.q.ListUpdateTargetMediaIDs(s.Work.Context)
 	}
 	if err != nil {
 		s.updateMu.Unlock()
@@ -103,12 +107,12 @@ func (s *Syncer) StartLibraryUpdate(sc *sandbox.SupervisedClient, folderID *int6
 	}
 	s.updateMu.Unlock()
 
-	go s.runLibraryUpdate(sc, ids)
+	s.Work.Go(func() { s.runLibraryUpdate(sc, ids) })
 	return true, nil
 }
 
 func (s *Syncer) runLibraryUpdate(sc *sandbox.SupervisedClient, ids []int64) {
-	ctx := context.Background()
+	ctx := s.Work.Context
 	defer func() {
 		s.updateMu.Lock()
 		s.updateProg.Running = false
@@ -311,7 +315,7 @@ func (s *Syncer) InstallExternalExtension(ctx context.Context, c *sandbox.Client
 	}
 	tempPath := filepath.Join(tempDir, fmt.Sprintf("sideload-%d.%s", time.Now().UnixNano(), ext))
 
-	if err := downloadFile(url, tempPath); err != nil {
+	if err := downloadFile(ctx, url, tempPath); err != nil {
 		return sqlcgen.Extension{}, fmt.Errorf("downloading %s: %w", url, err)
 	}
 	defer os.Remove(tempPath)
@@ -347,8 +351,14 @@ func (s *Syncer) InstallExternalExtension(ctx context.Context, c *sandbox.Client
 	})
 }
 
-func downloadFile(url, destPath string) error {
-	resp, err := http.Get(url)
+func downloadFile(ctx context.Context, url, destPath string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -796,6 +806,11 @@ func (s *Syncer) MigrateMedia(ctx context.Context, c *sandbox.Client, fromMediaI
 	}
 	defer func() { _ = tx.Rollback() }()
 	qtx := s.q.WithTx(tx)
+	// Preserve automation overrides when adopting a new source for this title.
+	// An existing target policy remains authoritative.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO automation_policies(scope_id,policy_json) SELECT ?,policy_json FROM automation_policies WHERE scope_id=? ON CONFLICT(scope_id) DO NOTHING`, newMedia.ID, fromMediaID); err != nil {
+		return sqlcgen.Medium{}, fmt.Errorf("carry automation policy: %w", err)
+	}
 
 	for _, p := range progress {
 		oldCh, ok := oldByID[p.ChapterID]
@@ -980,9 +995,9 @@ func (s *Syncer) upsertEntryFromDetails(ctx context.Context, c *sandbox.Client, 
 	// resolvers (e.g. ResolveMedia), so leaving it synchronous stalls the
 	// HTTP response on every newly-added entry.
 	id := entry.ID
-	go s.maybeEnrich(context.Background(), id)
+	s.Work.Go(func() { s.maybeEnrich(s.Work.Context, id) })
 	if s.recompute != nil {
-		go func() { _ = s.recompute.RecomputeMedia(context.Background(), id) }()
+		s.Work.Go(func() { _ = s.recompute.RecomputeMedia(s.Work.Context, id) })
 	}
 	if refreshed, err := s.q.GetMedia(ctx, entry.ID); err == nil {
 		entry = refreshed
@@ -1025,18 +1040,21 @@ func (s *Syncer) EnsureHydrated(ctx context.Context, sc *sandbox.SupervisedClien
 	if err != nil {
 		return sqlcgen.Medium{}, err
 	}
-	if m.DetailsFetchedAt.Valid || !m.ExtensionID.Valid {
+	if sc == nil || m.DetailsFetchedAt.Valid || !m.ExtensionID.Valid {
 		return m, nil
 	}
 
 	lk := s.lockFor(fmt.Sprintf("hydrate:%d", id))
 	if lk.TryLock() {
 		done := make(chan struct{})
-		go func() {
+		if !s.Work.Go(func() {
 			defer lk.Unlock()
 			defer close(done)
-			s.hydrateNow(context.Background(), sc, id)
-		}()
+			s.hydrateNow(s.Work.Context, sc, id)
+		}) {
+			lk.Unlock()
+			close(done)
+		}
 		waitFor(done, hydrateWait)
 	} else {
 		waitForLock(lk, hydrateWait)
@@ -1096,18 +1114,21 @@ func (s *Syncer) EnsureChapters(ctx context.Context, sc *sandbox.SupervisedClien
 	if err != nil {
 		return nil, err
 	}
-	if m.ChaptersSyncedAt.Valid || !m.ExtensionID.Valid {
+	if sc == nil || m.ChaptersSyncedAt.Valid || !m.ExtensionID.Valid {
 		return s.q.ListChaptersByMedia(ctx, id)
 	}
 
 	lk := s.lockFor(fmt.Sprintf("chapters:%d", id))
 	if lk.TryLock() {
 		done := make(chan struct{})
-		go func() {
+		if !s.Work.Go(func() {
 			defer lk.Unlock()
 			defer close(done)
-			s.syncChaptersNow(context.Background(), sc, id)
-		}()
+			s.syncChaptersNow(s.Work.Context, sc, id)
+		}) {
+			lk.Unlock()
+			close(done)
+		}
 		waitFor(done, hydrateWait)
 	} else {
 		waitForLock(lk, hydrateWait)
@@ -1423,6 +1444,17 @@ func (s *Syncer) SyncChapters(ctx context.Context, c *sandbox.Client, libraryEnt
 		return nil, fmt.Errorf("get extension %d: %w", entry.ExtensionID.Int64, err)
 	}
 
+	existing := map[int64]bool{}
+	if entry.ChaptersSyncedAt.Valid {
+		rows, err := s.q.ListChaptersByMedia(ctx, libraryEntryID)
+		if err != nil {
+			return nil, err
+		}
+		for _, ch := range rows {
+			existing[ch.ID] = true
+		}
+	}
+
 	summaries, err := s.fetchChapterSummaries(ctx, c, ext.PackageName, ext.ContentType, entry.ExternalID)
 	if err != nil {
 		return nil, err
@@ -1470,6 +1502,22 @@ func (s *Syncer) SyncChapters(ctx context.Context, c *sandbox.Client, libraryEnt
 		log.Printf("sync: marking chapters synced for media %d failed: %v", libraryEntryID, err)
 	}
 
+	if s.OnNewChapters != nil && entry.ChaptersSyncedAt.Valid {
+		var ids []int64
+		for _, ch := range chapters {
+			if !existing[ch.ID] {
+				ids = append(ids, ch.ID)
+			}
+		}
+		if len(ids) > 0 {
+			s.Work.Go(func() {
+				if err := s.OnNewChapters(s.Work.Context, libraryEntryID, ids); err != nil {
+					log.Printf("automation new chapters: %v", err)
+				}
+			})
+		}
+	}
+
 	return chapters, nil
 }
 
@@ -1486,7 +1534,22 @@ func (s *Syncer) RecordProgress(ctx context.Context, libraryEntryID, chapterID i
 	if durationSeconds != nil {
 		params.DurationSeconds = sql.NullFloat64{Float64: *durationSeconds, Valid: true}
 	}
-	return s.q.UpsertReadingProgress(ctx, params)
+	ch, err := s.q.GetChapter(ctx, chapterID)
+	if err != nil {
+		return sqlcgen.ReadingProgress{}, err
+	}
+	if ch.MediaID != libraryEntryID {
+		return sqlcgen.ReadingProgress{}, fmt.Errorf("chapter does not belong to media")
+	}
+	row, err := s.q.UpsertReadingProgress(ctx, params)
+	if err == nil && s.OnProgress != nil {
+		s.Work.Go(func() {
+			if err := s.OnProgress(s.Work.Context, libraryEntryID, chapterID, completed); err != nil {
+				log.Printf("automation progress: %v", err)
+			}
+		})
+	}
+	return row, err
 }
 
 func (s *Syncer) MarkChapterRead(ctx context.Context, libraryEntryID, chapterID int64) (sqlcgen.ReadingProgress, error) {

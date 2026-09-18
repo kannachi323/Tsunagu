@@ -18,7 +18,7 @@ class SourceErrorsTest {
         assertEquals(SourceErrors.NOT_FOUND, code(RuntimeException("boom", RuntimeException("HTTP error 410"))))
         assertEquals(SourceErrors.RATE_LIMITED, code(HttpException(429)))
         assertEquals(SourceErrors.UNAVAILABLE, code(HttpException(522)))
-        assertEquals(SourceErrors.CLOUDFLARE, code(HttpException(403)))
+        assertEquals(SourceErrors.UNAVAILABLE, code(HttpException(403)))
         assertEquals(SourceErrors.NETWORK, code(UnknownHostException("nope.example")))
         assertEquals(SourceErrors.PARSE, code(NullPointerException("jsoup select returned null")))
         assertEquals(SourceErrors.INTERNAL, code(IllegalStateException("something odd")))

@@ -177,6 +177,7 @@ func (q *Queries) DeleteDownloadsByChapters(ctx context.Context, chapterIds []in
 const enqueueDownload = `-- name: EnqueueDownload :one
 INSERT INTO downloads (chapter_id, status, position)
 VALUES (?, 'queued', COALESCE((SELECT MAX(position) FROM downloads WHERE status = 'queued'), 0) + 1)
+ON CONFLICT(chapter_id) DO UPDATE SET chapter_id = excluded.chapter_id
 RETURNING id, chapter_id, status, progress, downloaded_bytes, bytes_per_sec, position, error, created_at, completed_at
 `
 
@@ -453,7 +454,7 @@ func (q *Queries) SetDownloadPosition(ctx context.Context, arg SetDownloadPositi
 }
 
 const updateDownloadProgress = `-- name: UpdateDownloadProgress :exec
-UPDATE downloads SET status = ?, progress = ? WHERE id = ?
+UPDATE downloads SET status = ?, progress = MIN(?, 0.99) WHERE id = ?
 `
 
 type UpdateDownloadProgressParams struct {
@@ -468,7 +469,7 @@ func (q *Queries) UpdateDownloadProgress(ctx context.Context, arg UpdateDownload
 }
 
 const updateDownloadStats = `-- name: UpdateDownloadStats :exec
-UPDATE downloads SET status = ?, progress = ?, downloaded_bytes = ?, bytes_per_sec = ? WHERE id = ?
+UPDATE downloads SET status = ?, progress = MIN(?, 0.99), downloaded_bytes = ?, bytes_per_sec = ? WHERE id = ?
 `
 
 type UpdateDownloadStatsParams struct {

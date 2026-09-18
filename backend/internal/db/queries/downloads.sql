@@ -1,6 +1,7 @@
 -- name: EnqueueDownload :one
 INSERT INTO downloads (chapter_id, status, position)
 VALUES (?, 'queued', COALESCE((SELECT MAX(position) FROM downloads WHERE status = 'queued'), 0) + 1)
+ON CONFLICT(chapter_id) DO UPDATE SET chapter_id = excluded.chapter_id
 RETURNING *;
 
 -- name: ListQueuedDownloads :many
@@ -11,7 +12,7 @@ SELECT * FROM downloads WHERE status = 'queued' ORDER BY position;
 SELECT status, COUNT(*) AS count FROM downloads GROUP BY status;
 
 -- name: UpdateDownloadProgress :exec
-UPDATE downloads SET status = ?, progress = ? WHERE id = ?;
+UPDATE downloads SET status = ?, progress = MIN(?, 0.99) WHERE id = ?;
 
 -- name: CompleteDownload :exec
 UPDATE downloads SET status = 'done', progress = 1, completed_at = CURRENT_TIMESTAMP WHERE id = ?;
@@ -26,7 +27,7 @@ DELETE FROM downloads WHERE id = ?;
 UPDATE downloads SET status = 'queued', progress = 0 WHERE status = 'downloading';
 
 -- name: UpdateDownloadStats :exec
-UPDATE downloads SET status = ?, progress = ?, downloaded_bytes = ?, bytes_per_sec = ? WHERE id = ?;
+UPDATE downloads SET status = ?, progress = MIN(?, 0.99), downloaded_bytes = ?, bytes_per_sec = ? WHERE id = ?;
 
 -- name: GetLatestDownloadForChapter :one
 SELECT * FROM downloads WHERE chapter_id = ? ORDER BY created_at DESC LIMIT 1;
