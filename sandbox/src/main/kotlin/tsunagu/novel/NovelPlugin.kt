@@ -60,7 +60,12 @@ class NovelPlugin(
             var box = { done: false, value: undefined, error: undefined };
             fn.apply(thisArg, args).then(
                 function(v) { box.done = true; box.value = v; },
-                function(e) { box.done = true; box.error = (e && e.message) ? e.message : String(e); }
+                function(e) {
+                    box.done = true;
+                    if (typeof e === "string") box.error = e;
+                    else if (e && typeof e.message === "string") box.error = e.message;
+                    else box.error = "non-string error thrown";
+                }
             );
             return box;
         })
@@ -79,7 +84,12 @@ class NovelPlugin(
         }
         val error = box.getMember("error")
         if (error != null && !error.isNull) {
-            throw NovelPluginException("$id: $methodName threw: ${error.asString()}")
+            val message = try {
+                if (error.isString) error.asString() else "non-string error thrown"
+            } catch (_: Throwable) {
+                "unreadable error"
+            }
+            throw NovelPluginException("$id: $methodName threw: $message")
         }
         return box.getMember("value")
     }

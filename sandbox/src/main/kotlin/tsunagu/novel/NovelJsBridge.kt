@@ -161,7 +161,11 @@ object NovelJsBridge {
     private fun cheerioModule(): ProxyObject = ProxyObject.fromMap(mapOf(
         "load" to ProxyExecutable { args ->
             val doc = Jsoup.parse(args[0].asString())
-            ProxyExecutable { selArgs -> CheerioSelection(doc.select(selArgs[0].asString())) }
+            ProxyExecutable { selArgs ->
+                val arg = selArgs.getOrNull(0)
+                if (arg != null && arg.hasMember("find")) arg
+                else CheerioSelection(doc.select(arg?.asString() ?: ""))
+            }
         },
     ))
 

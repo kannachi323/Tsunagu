@@ -26,8 +26,24 @@ object NovelPluginLoader {
     """
 
     private const val URL_SEARCH_PARAMS_GLUE = """
-        function URLSearchParams() {
+        function URLSearchParams(init) {
+            var self = this;
             this._entries = [];
+            if (init) {
+                if (typeof init === 'string') {
+                    init.replace(/^\?/, '').split('&').forEach(function(pair) {
+                        if (!pair) return;
+                        var idx = pair.indexOf('=');
+                        var k = idx >= 0 ? pair.slice(0, idx) : pair;
+                        var v = idx >= 0 ? pair.slice(idx + 1) : '';
+                        self._entries.push([decodeURIComponent(k), decodeURIComponent(v)]);
+                    });
+                } else if (Array.isArray(init)) {
+                    init.forEach(function(pair) { self._entries.push([pair[0], pair[1]]); });
+                } else if (typeof init === 'object') {
+                    Object.keys(init).forEach(function(k) { self._entries.push([k, init[k]]); });
+                }
+            }
         }
         URLSearchParams.prototype.append = function(k, v) { this._entries.push([k, v]); };
         URLSearchParams.prototype.toString = function() {
