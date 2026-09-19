@@ -21,6 +21,11 @@ data class LoadedExtension(
 
 class ExtensionLoadException(message: String) : Exception(message)
 
+// SourceFactory extensions (e.g. MangaDex) register one Source per language; picking index 0
+// blindly locks every request to whatever language sorts first alphabetically (e.g. "af").
+private fun List<Source>.pickPreferredLang(): Source? = find { it.lang == "en" } ?: firstOrNull()
+private fun List<AnimeSource>.pickPreferredLang(): AnimeSource? = find { it.lang == "en" } ?: firstOrNull()
+
 object ExtensionLoader {
     private const val METADATA_SOURCE_CLASS = "tachiyomi.extension.class"
     private const val METADATA_ANIME_SOURCE_CLASS = "tachiyomi.animeextension.class"
@@ -97,10 +102,10 @@ object ExtensionLoader {
 
         val source: Any = when (instance) {
             is Source -> instance
-            is SourceFactory -> instance.createSources().firstOrNull()
+            is SourceFactory -> instance.createSources().pickPreferredLang()
                 ?: throw ExtensionLoadException("$className is a SourceFactory but createSources() returned nothing")
             is AnimeSource -> instance
-            is AnimeSourceFactory -> instance.createSources().firstOrNull()
+            is AnimeSourceFactory -> instance.createSources().pickPreferredLang()
                 ?: throw ExtensionLoadException("$className is an AnimeSourceFactory but createSources() returned nothing")
             else -> throw ExtensionLoadException(
                 "$className does not implement eu.kanade.tachiyomi.source.Source, SourceFactory, " +

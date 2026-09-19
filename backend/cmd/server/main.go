@@ -211,10 +211,17 @@ func main() {
 	})
 	defer supervised.Shutdown()
 
-	if err := reloadInstalledExtensions(context.Background(), syncer, supervised); err != nil {
-		log.Printf("warning: could not reload installed extensions on startup: %v", err)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		start := time.Now()
+		if err := reloadInstalledExtensions(ctx, syncer, supervised); err != nil {
+			log.Printf("warning: could not reload installed extensions on startup: %v (after %s)", err, time.Since(start).Round(time.Second))
+		} else {
+			log.Printf("reloaded installed extensions in %s", time.Since(start).Round(time.Second))
+		}
+	}()
 
-	}
 	resolveDownloadsDir := func() string {
 		d := strings.TrimSpace(store.Config().DownloadsDir)
 		if d == "" {
@@ -380,6 +387,7 @@ func reloadInstalledExtensions(ctx context.Context, sy *sync.Syncer, sc *sandbox
 	if len(toLoad) == 0 {
 		return nil
 	}
+	log.Printf("reloading %d installed extensions", len(toLoad))
 
 	c, err := sc.Ensure(ctx)
 	if err != nil {
