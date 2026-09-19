@@ -94,8 +94,12 @@ class ExtensionRegistry(
             throw InvalidExtensionIdException("novel extensions are disabled: $extensionId")
         }
         val target = targetFile(extensionId, ext)
+        val upToDate = target.exists() &&
+            (target.canonicalFile == sourceFile.canonicalFile || target.length() == sourceFile.length())
         evict(extensionId)
-        replaceFile(target) { Files.copy(sourceFile.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING) }
+        if (!upToDate) {
+            replaceFile(target) { Files.copy(sourceFile.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING) }
+        }
         return load(target)
     }
 
@@ -141,8 +145,11 @@ class ExtensionRegistry(
         val bytes = response.body.bytes()
 
         val target = targetFile(extensionId, ext)
+        val upToDate = target.exists() && target.length() == bytes.size.toLong()
         evict(extensionId)
-        replaceFile(target) { Files.write(target.toPath(), bytes) }
+        if (!upToDate) {
+            replaceFile(target) { Files.write(target.toPath(), bytes) }
+        }
         return load(target)
     }
 

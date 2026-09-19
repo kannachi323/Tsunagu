@@ -13,6 +13,8 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.grpc.Status
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import sandbox.v1.ExtensionServiceGrpc
 import sandbox.v1.Sandbox
@@ -76,10 +78,20 @@ class ExtensionServiceImpl(
         responseObserver: StreamObserver<Sandbox.ExtensionList>,
     ) {
         try {
+            // File copies (and their Windows AV-scan/lock overhead) dominate this call, so
+            // load extensions concurrently instead of one at a time.
+            val dispatcher = Dispatchers.IO.limitedParallelism(8)
+            val results = runBlocking {
+                request.extensionsList.map { toLoad ->
+                    async(dispatcher) {
+                        toLoad to runCatching { registry.install(File(toLoad.jarPath), toLoad.extensionId) }
+                    }
+                }.map { it.await() }
+            }
             val builder = Sandbox.ExtensionList.newBuilder()
-            request.extensionsList.forEach { toLoad ->
-                val loaded = registry.install(File(toLoad.jarPath), toLoad.extensionId)
-                builder.addExtensions(toExtensionProto(loaded))
+            results.forEach { (toLoad, result) ->
+                result.onSuccess { loaded -> builder.addExtensions(toExtensionProto(loaded)) }
+                    .onFailure { e -> logger.error(e) { "failed to load extension ${toLoad.extensionId}" } }
             }
             responseObserver.onNext(builder.build())
             responseObserver.onCompleted()
