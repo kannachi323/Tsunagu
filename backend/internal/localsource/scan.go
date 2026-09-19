@@ -1,7 +1,6 @@
 package localsource
 
 import (
-	"archive/zip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -87,7 +86,8 @@ var videoExts = map[string]bool{
 	".mp4": true, ".mkv": true, ".webm": true, ".m4v": true, ".avi": true, ".mov": true,
 }
 var archiveExts = map[string]bool{
-	".cbz": true, ".zip": true,
+	".cbz": true, ".zip": true, ".cbr": true, ".rar": true,
+	".cb7": true, ".7z": true, ".cbt": true, ".tar": true,
 }
 
 func (s *Scanner) Scan(ctx context.Context) (Result, error) {
@@ -210,21 +210,9 @@ func (s *Scanner) upsertChapterRow(ctx context.Context, mediaID int64, mediaExte
 // its image entries directly (no extraction to disk) — mirrors ingestChapter
 // but sources pages from inside the archive instead of a folder.
 func (s *Scanner) ingestArchiveChapter(ctx context.Context, mediaID int64, mediaExternalID, chapName, archivePath string, idx int) (created bool, linked int, err error) {
-	zr, err := zip.OpenReader(archivePath)
+	names, err := listArchiveImageNames(archivePath)
 	if err != nil {
 		return false, 0, err
-	}
-	defer zr.Close()
-
-	names := make([]string, 0, len(zr.File))
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		if !imageExts[strings.ToLower(filepath.Ext(f.Name))] {
-			continue
-		}
-		names = append(names, f.Name)
 	}
 	sort.Sort(naturalSort(names))
 
@@ -360,13 +348,12 @@ func gone(path string) bool {
 		return true
 	}
 	if archivePath, entryName, ok := ParseZipPagePath(path); ok {
-		zr, err := zip.OpenReader(archivePath)
+		names, err := listArchiveImageNames(archivePath)
 		if err != nil {
 			return os.IsNotExist(err)
 		}
-		defer zr.Close()
-		for _, f := range zr.File {
-			if f.Name == entryName {
+		for _, name := range names {
+			if name == entryName {
 				return false
 			}
 		}

@@ -24,7 +24,11 @@ fun main() {
     startKoin {
         modules(
             module {
-                single { Json { ignoreUnknownKeys = true } }
+                // explicitNulls = false matters independently of ignoreUnknownKeys: a
+                // nullable property with no `= null` default still throws
+                // MissingFieldException when its key is absent from the JSON unless
+                // this is set — several extensions (e.g. Flame Comics) rely on that.
+                single { Json { ignoreUnknownKeys = true; explicitNulls = false } }
                 single { NetworkHelper() }
                 single { android.app.Application() }
             }

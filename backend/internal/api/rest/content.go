@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"archive/zip"
 	"context"
 	"database/sql"
 	"encoding/base64"
@@ -1286,32 +1285,15 @@ func imageContentType(name string) string {
 	}
 }
 
-// serveZipEntry reads a single page directly out of a CBZ/ZIP archive
-// without extracting it to disk. Returns false if the entry couldn't be
-// served, so the caller can fall through to other page sources.
+// serveZipEntry reads a single page directly out of a CBZ/ZIP or CBR/RAR
+// archive without extracting it to disk. Returns false if the entry
+// couldn't be served, so the caller can fall through to other page sources.
 func serveZipEntry(w http.ResponseWriter, archivePath, entryName string) bool {
-	zr, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return false
-	}
-	defer zr.Close()
-
-	for _, f := range zr.File {
-		if f.Name != entryName {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return false
-		}
-		defer rc.Close()
-		w.Header().Set("Content-Type", imageContentType(f.Name))
-		w.Header().Set("Content-Length", strconv.FormatUint(f.UncompressedSize64, 10))
+	return localsource.ServeArchiveEntry(w, func(name string, size int64) {
+		w.Header().Set("Content-Type", imageContentType(name))
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		_, _ = io.Copy(w, rc)
-		return true
-	}
-	return false
+	}, archivePath, entryName)
 }
 
 var _ = sql.ErrNoRows

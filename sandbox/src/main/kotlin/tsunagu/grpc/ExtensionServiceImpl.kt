@@ -169,9 +169,18 @@ class ExtensionServiceImpl(
             }
             responseObserver.onNext(builder.build())
             responseObserver.onCompleted()
+        } catch (e: UnsupportedOperationException) {
+            logger.info { "extension ${request.extensionId} has no search, returning empty page" }
+            responseObserver.onNext(Sandbox.SearchResponse.newBuilder().setHasNextPage(false).build())
+            responseObserver.onCompleted()
         } catch (e: Throwable) {
             logExtensionFailure(e)
-            responseObserver.onError(internal(e))
+            if (SourceErrors.isExpected(e)) {
+                responseObserver.onNext(Sandbox.SearchResponse.newBuilder().setHasNextPage(false).build())
+                responseObserver.onCompleted()
+            } else {
+                responseObserver.onError(internal(e))
+            }
         }
     }
 
@@ -292,7 +301,12 @@ class ExtensionServiceImpl(
             responseObserver.onCompleted()
         } catch (e: Throwable) {
             logExtensionFailure(e)
-            responseObserver.onError(internal(e))
+            if (SourceErrors.isExpected(e)) {
+                responseObserver.onNext(Sandbox.SearchResponse.newBuilder().setHasNextPage(false).build())
+                responseObserver.onCompleted()
+            } else {
+                responseObserver.onError(internal(e))
+            }
         }
     }
 
@@ -338,7 +352,12 @@ class ExtensionServiceImpl(
             responseObserver.onCompleted()
         } catch (e: Throwable) {
             logExtensionFailure(e)
-            responseObserver.onError(internal(e))
+            if (SourceErrors.isExpected(e)) {
+                responseObserver.onNext(Sandbox.SearchResponse.newBuilder().setHasNextPage(false).build())
+                responseObserver.onCompleted()
+            } else {
+                responseObserver.onError(internal(e))
+            }
         }
     }
 
@@ -449,7 +468,8 @@ class ExtensionServiceImpl(
             val chapter: SChapter = chapterStub(request.extensionId, request.sourceChapterId)
             val pages = runBlocking {
                 source.getPageList(chapter).map { page ->
-                    page.imageUrl ?: source.getImageUrl(page)
+                    if (page.imageUrl == null) page.imageUrl = source.getImageUrl(page)
+                    source.resolveImageUrl(page)
                 }
             }
             val builder = Sandbox.PageList.newBuilder()

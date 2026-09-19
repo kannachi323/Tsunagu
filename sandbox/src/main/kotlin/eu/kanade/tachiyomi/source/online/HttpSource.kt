@@ -156,6 +156,12 @@ abstract class HttpSource : CatalogueSource {
 
     protected open fun imageRequest(page: Page): Request = GET(page.imageUrl!!, headers)
 
+    // Some sources (e.g. MangaDex) store a partial/relative value in `page.imageUrl` and
+    // only produce the real absolute URL inside their `imageRequest` override. Callers outside
+    // this class hierarchy can't invoke that protected method directly, so this public wrapper
+    // resolves the real request URL polymorphically without needing the full OkHttp Request.
+    fun resolveImageUrl(page: Page): String = imageRequest(page).url.toString()
+
     fun SChapter.setUrlWithoutDomain(url: String) {
         this.url = getUrlWithoutDomain(url)
     }
