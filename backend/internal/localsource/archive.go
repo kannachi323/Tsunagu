@@ -3,6 +3,8 @@ package localsource
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +21,7 @@ const (
 	archiveRar
 	archiveSevenZip
 	archiveTar
+	archivePdf
 )
 
 func kindOf(archivePath string) archiveKind {
@@ -29,17 +32,115 @@ func kindOf(archivePath string) archiveKind {
 		return archiveSevenZip
 	case ".cbt", ".tar":
 		return archiveTar
+	case ".pdf":
+		return archivePdf
 	default:
 		return archiveZip
 	}
 }
 
-// ServeArchiveEntry writes a single page's bytes directly out of a CBZ/ZIP,
-// CBR/RAR, CB7/7z or CBT/TAR archive to w, without extracting to disk.
-// Returns false if the entry couldn't be found/served, so the caller can
-// fall through.
+func ArchiveHasEntry(archivePath, entryName string) bool {
+	switch kindOf(archivePath) {
+	case archivePdf:
+		names, err := pdfPageNames(archivePath)
+		if err != nil {
+			return false
+		}
+		for _, n := range names {
+			if n == entryName {
+				return true
+			}
+		}
+		return false
+
+	case archiveRar:
+		rr, err := rardecode.OpenReader(archivePath)
+		if err != nil {
+			return false
+		}
+		defer rr.Close()
+		for {
+			h, err := rr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return false
+			}
+			if !h.IsDir && h.Name == entryName {
+				return true
+			}
+		}
+		return false
+
+	case archiveSevenZip:
+		zr, err := sevenzip.OpenReader(archivePath)
+		if err != nil {
+			return false
+		}
+		defer zr.Close()
+		for _, f := range zr.File {
+			if f.Name == entryName {
+				return true
+			}
+		}
+		return false
+
+	case archiveTar:
+		f, err := os.Open(archivePath)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		tr := tar.NewReader(f)
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return false
+			}
+			if h.Typeflag == tar.TypeReg && h.Name == entryName {
+				return true
+			}
+		}
+		return false
+
+	default:
+		zr, err := zip.OpenReader(archivePath)
+		if err != nil {
+			return false
+		}
+		defer zr.Close()
+		for _, f := range zr.File {
+			if f.Name == entryName {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func ReadArchiveEntry(archivePath, entryName string) ([]byte, error) {
+	var buf bytes.Buffer
+	if !ServeArchiveEntry(&buf, func(string, int64) {}, archivePath, entryName) {
+		return nil, fmt.Errorf("archive entry not found: %s!%s", archivePath, entryName)
+	}
+	return buf.Bytes(), nil
+}
+
 func ServeArchiveEntry(w io.Writer, setHeaders func(name string, size int64), archivePath, entryName string) bool {
 	switch kindOf(archivePath) {
+	case archivePdf:
+		data, ext, err := extractPdfPageImage(archivePath, entryName)
+		if err != nil {
+			return false
+		}
+		setHeaders("page"+ext, int64(len(data)))
+		_, _ = w.Write(data)
+		return true
+
 	case archiveRar:
 		rr, err := rardecode.OpenReader(archivePath)
 		if err != nil {
@@ -135,11 +236,11 @@ func ServeArchiveEntry(w io.Writer, setHeaders func(name string, size int64), ar
 	}
 }
 
-// listArchiveImageNames returns the image entry names inside a CBZ/ZIP,
-// CBR/RAR, CB7/7z or CBT/TAR archive, in archive order (callers apply
-// natural sort separately).
 func listArchiveImageNames(archivePath string) ([]string, error) {
 	switch kindOf(archivePath) {
+	case archivePdf:
+		return pdfPageNames(archivePath)
+
 	case archiveRar:
 		rr, err := rardecode.OpenReader(archivePath)
 		if err != nil {

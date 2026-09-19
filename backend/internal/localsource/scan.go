@@ -80,14 +80,17 @@ var imageExts = map[string]bool{
 	".gif": true, ".avif": true, ".bmp": true,
 }
 var textExts = map[string]bool{
-	".txt": true, ".html": true, ".htm": true, ".xhtml": true, ".epub": true, ".md": true,
+	".txt": true, ".html": true, ".htm": true, ".xhtml": true, ".md": true,
+}
+var bookExts = map[string]bool{
+	".epub": true,
 }
 var videoExts = map[string]bool{
 	".mp4": true, ".mkv": true, ".webm": true, ".m4v": true, ".avi": true, ".mov": true,
 }
 var archiveExts = map[string]bool{
 	".cbz": true, ".zip": true, ".cbr": true, ".rar": true,
-	".cb7": true, ".7z": true, ".cbt": true, ".tar": true,
+	".cb7": true, ".7z": true, ".cbt": true, ".tar": true, ".pdf": true,
 }
 
 func (s *Scanner) Scan(ctx context.Context) (Result, error) {
@@ -151,6 +154,10 @@ func (s *Scanner) ingestKind(ctx context.Context, kindDir, kindSegment, ct strin
 				names = append(names, e.Name())
 				continue
 			}
+			if ct == "novel" && bookExts[strings.ToLower(filepath.Ext(e.Name()))] {
+				names = append(names, e.Name())
+				continue
+			}
 			if isCoverFilename(e.Name()) {
 				continue
 			}
@@ -166,10 +173,14 @@ func (s *Scanner) ingestKind(ctx context.Context, kindDir, kindSegment, ct strin
 				linked  int
 				err     error
 			)
-			if ext := strings.ToLower(filepath.Ext(chapName)); ct == "manga" && archiveExts[ext] {
+			ext := strings.ToLower(filepath.Ext(chapName))
+			switch {
+			case ct == "manga" && archiveExts[ext]:
 				name := strings.TrimSuffix(chapName, filepath.Ext(chapName))
 				created, linked, err = s.ingestArchiveChapter(ctx, media.ID, externalID, name, chapPath, idx)
-			} else {
+			case ct == "novel" && bookExts[ext]:
+				created, linked, err = s.ingestEpubBook(ctx, media.ID, externalID, chapPath, idx)
+			default:
 				created, linked, err = s.ingestChapter(ctx, media.ID, ct, externalID, chapName, chapPath, idx)
 			}
 			if err != nil {
@@ -185,21 +196,25 @@ func (s *Scanner) ingestKind(ctx context.Context, kindDir, kindSegment, ct strin
 }
 
 func (s *Scanner) upsertChapterRow(ctx context.Context, mediaID int64, mediaExternalID, chapName string, idx int) (sqlcgen.Chapter, bool, error) {
-	chExternalID := mediaExternalID + "/" + chapName
+	return s.upsertChapterRowNamed(ctx, mediaID, mediaExternalID, chapName, chapName, idx)
+}
+
+func (s *Scanner) upsertChapterRowNamed(ctx context.Context, mediaID int64, mediaExternalID, key, title string, idx int) (sqlcgen.Chapter, bool, error) {
+	chExternalID := mediaExternalID + "/" + key
 	_, getErr := s.q.GetChapterByMediaAndExternalID(ctx, sqlcgen.GetChapterByMediaAndExternalIDParams{
 		MediaID:    mediaID,
 		ExternalID: chExternalID,
 	})
 	created := getErr == sql.ErrNoRows
 
-	num := parseLeadingNumber(chapName)
+	num := parseLeadingNumber(key)
 	if num < 0 {
 		num = float64(idx + 1)
 	}
 	ch, err := s.q.CreateChapter(ctx, sqlcgen.CreateChapterParams{
 		MediaID:     mediaID,
 		ExternalID:  chExternalID,
-		Title:       sql.NullString{String: chapName, Valid: true},
+		Title:       sql.NullString{String: title, Valid: true},
 		Number:      sql.NullFloat64{Float64: num, Valid: true},
 		SourceOrder: sql.NullInt64{Int64: int64(idx), Valid: true},
 	})
@@ -231,6 +246,30 @@ func (s *Scanner) ingestArchiveChapter(ctx context.Context, mediaID int64, media
 			ChapterID:  ch.ID,
 			PageNumber: int64(page),
 			LocalPath:  sql.NullString{String: ZipPagePath(archivePath, name), Valid: true},
+		}); err != nil {
+			return created, linked, err
+		}
+		linked++
+	}
+	return created, linked, nil
+}
+
+func (s *Scanner) ingestEpubBook(ctx context.Context, mediaID int64, mediaExternalID, epubPath string, startIdx int) (created bool, linked int, err error) {
+	chapters, err := ParseEpubSpine(epubPath)
+	if err != nil {
+		return false, 0, err
+	}
+	for i, c := range chapters {
+		ch, chCreated, err := s.upsertChapterRowNamed(ctx, mediaID, mediaExternalID, c.EntryPath, c.Title, startIdx+i)
+		if err != nil {
+			return created, linked, err
+		}
+		if chCreated {
+			created = true
+		}
+		if err := s.q.UpsertNovelChapterContent(ctx, sqlcgen.UpsertNovelChapterContentParams{
+			ChapterID: ch.ID,
+			LocalPath: sql.NullString{String: ZipPagePath(epubPath, c.EntryPath), Valid: true},
 		}); err != nil {
 			return created, linked, err
 		}
@@ -348,16 +387,10 @@ func gone(path string) bool {
 		return true
 	}
 	if archivePath, entryName, ok := ParseZipPagePath(path); ok {
-		names, err := listArchiveImageNames(archivePath)
-		if err != nil {
+		if _, err := os.Stat(archivePath); err != nil {
 			return os.IsNotExist(err)
 		}
-		for _, name := range names {
-			if name == entryName {
-				return false
-			}
-		}
-		return true
+		return !ArchiveHasEntry(archivePath, entryName)
 	}
 	_, err := os.Stat(path)
 	return err != nil && os.IsNotExist(err)

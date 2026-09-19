@@ -95,11 +95,20 @@ class NovelPlugin(
     }
 
     fun popularNovels(pageNo: Int): List<NovelItem> = onJs {
-        toValueList(callMethod("popularNovels", pageNo, emptyOptionsValue())).map(::toNovelItem)
+        toValueList(callMethod("popularNovels", pageNo, defaultOptionsValue())).map(::toNovelItem)
     }
 
-    private fun emptyOptionsValue(): Value =
-        context.eval("js", "({ filters: {}, showLatestNovels: false })")
+    // Plugins destructure `filters.<key>.value` assuming the host passes back
+    // their own declared filter defaults (LNReader's app does this by cloning
+    // `plugin.filters`) - passing a bare `{}` leaves every key undefined and
+    // throws inside the plugin's own code the moment it reads e.g. `filters.sort.value`.
+    private fun defaultOptionsValue(): Value =
+        defaultOptionsBuilder.execute(pluginValue)
+
+    private val defaultOptionsBuilder: Value = context.eval(
+        "js",
+        "(function(p) { return { filters: p.filters || {}, showLatestNovels: false }; })",
+    )
 
     fun searchNovels(searchTerm: String, pageNo: Int): List<NovelItem> = onJs {
         toValueList(callMethod("searchNovels", searchTerm, pageNo)).map(::toNovelItem)

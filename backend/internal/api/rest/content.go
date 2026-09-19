@@ -1215,8 +1215,17 @@ func (h *ContentHandler) serveText(w http.ResponseWriter, r *http.Request, chapt
 	ctx := r.Context()
 
 	if row, err := h.Q.GetNovelChapterContent(ctx, chapterID); err == nil && row.LocalPath.Valid && row.LocalPath.String != "" {
-		if data, rerr := os.ReadFile(row.LocalPath.String); rerr == nil {
-			ct := textContentType(row.LocalPath.String)
+		var data []byte
+		var rerr error
+		entryPath := row.LocalPath.String
+		if archivePath, entryName, ok := localsource.ParseZipPagePath(row.LocalPath.String); ok {
+			entryPath = entryName
+			data, rerr = localsource.ReadArchiveEntry(archivePath, entryName)
+		} else {
+			data, rerr = os.ReadFile(row.LocalPath.String)
+		}
+		if rerr == nil {
+			ct := textContentType(entryPath)
 			if strings.HasPrefix(ct, "text/html") {
 				data = []byte(sanitizeNovelHTML(string(data)))
 			}
