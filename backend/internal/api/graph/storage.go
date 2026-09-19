@@ -14,9 +14,7 @@ import (
 	"tsunagu/backend/internal/image"
 )
 
-// storageInfoCacheTTL bounds how often the (potentially several) full
-// directory walks below re-run -- on a large media dir each walk can take
-// seconds, and the frontend polls/re-fetches this on every page load.
+// storageInfoCacheTTL bounds how often the directory walks below re-run.
 const storageInfoCacheTTL = 20 * time.Second
 
 func (r *Resolver) storageInfoModel() (*model.StorageInfo, error) {
@@ -69,9 +67,7 @@ func (r *Resolver) storageInfoModel() (*model.StorageInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("disk stats: %w", err)
 	}
-	// DataDir is often unset (no --data-dir flag), and DBPath defaults to a
-	// bare relative filename -- neither is a meaningful open-folder target as
-	// written, so resolve both against the (already absolute) media dir.
+	// DataDir/DBPath are often unset or relative; resolve against media dir.
 	dataDir := c.DataDir
 	if dataDir == "" {
 		dataDir = r.MediaDir

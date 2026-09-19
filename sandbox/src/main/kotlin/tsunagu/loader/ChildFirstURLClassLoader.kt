@@ -22,6 +22,7 @@ class ChildFirstURLClassLoader(
             try {
                 c = systemClassLoader.loadClass(name)
             } catch (_: ClassNotFoundException) {
+            } catch (_: LinkageError) {
             }
         }
 

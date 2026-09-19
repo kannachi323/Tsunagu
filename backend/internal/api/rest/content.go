@@ -1308,8 +1308,6 @@ func serveZipEntry(w http.ResponseWriter, archivePath, entryName string) bool {
 		w.Header().Set("Content-Type", imageContentType(f.Name))
 		w.Header().Set("Content-Length", strconv.FormatUint(f.UncompressedSize64, 10))
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		// Stream straight from the archive entry instead of buffering the
-		// whole page in memory -- this runs on every CBZ page request.
 		_, _ = io.Copy(w, rc)
 		return true
 	}

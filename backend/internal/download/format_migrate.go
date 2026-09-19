@@ -22,9 +22,7 @@ type MigrateFormatResult struct {
 	ChaptersAlreadyTarget int64
 }
 
-// MigrateMangaFormat repacks every already-downloaded manga chapter between
-// loose image files and a single CBZ archive, to match a newly selected
-// manga_download_format. Chapters already in the target format are skipped.
+// MigrateMangaFormat repacks downloaded chapters between loose images and CBZ.
 func (m *Manager) MigrateMangaFormat(ctx context.Context, target string) (MigrateFormatResult, error) {
 	if target != "loose" && target != "cbz" {
 		return MigrateFormatResult{}, fmt.Errorf("unknown manga download format %q", target)

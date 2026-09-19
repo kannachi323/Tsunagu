@@ -119,9 +119,7 @@ func FetchIndex(indexURL string) ([]ParsedExtension, error) {
 		return nil, fetchErrorf("failed to fetch %s: HTTP %d", indexURL, resp.StatusCode)
 	}
 
-	// Repo indexes are JSON extension listings, never legitimately huge; cap
-	// both the raw fetch and the decompressed size so a misconfigured or
-	// malicious repo URL can't force an unbounded allocation.
+	// Repo indexes are JSON, never legitimately huge -- cap fetch/decompress size.
 	const maxIndexBytes = 32 << 20
 
 	rawBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexBytes+1))

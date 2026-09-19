@@ -64,6 +64,12 @@ var migration0014 string
 //go:embed migrations/0015_metadata_search_cooldown.sql
 var migration0015 string
 
+//go:embed migrations/0016_chapter_latest_index.sql
+var migration0016 string
+
+//go:embed migrations/0017_reading_progress_and_chapter_order_index.sql
+var migration0017 string
+
 var migrations = []struct {
 	name string
 	sql  string
@@ -83,6 +89,8 @@ var migrations = []struct {
 	{"0013_round_chapter_numbers.sql", migration0013},
 	{"0014_moderate_filter_mature_exempt.sql", migration0014},
 	{"0015_metadata_search_cooldown.sql", migration0015},
+	{"0016_chapter_latest_index.sql", migration0016},
+	{"0017_reading_progress_and_chapter_order_index.sql", migration0017},
 }
 
 func Open(path string) (*sql.DB, error) {

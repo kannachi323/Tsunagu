@@ -1693,6 +1693,9 @@ func (r *queryResolver) Media(ctx context.Context, id string) (*model.Media, err
 	if err != nil {
 		return nil, err
 	}
+	// Overlaps with the Chapters field resolver's own EnsureChapters call instead of stacking after it.
+	go func() { _, _ = r.Sy.EnsureChapters(context.Background(), r.Sc, mid) }()
+
 	m, err := r.Sy.EnsureHydrated(ctx, r.Sc, mid)
 	if err != nil {
 		if err == sql.ErrNoRows {

@@ -9,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"tsunagu/backend/internal/anilistrl"
 	"tsunagu/backend/internal/db/sqlcgen"
@@ -218,11 +221,41 @@ func (m *Manager) Link(ctx context.Context, mediaID int64) (*sqlcgen.MetadataLin
 }
 
 var malCache sync.Map
+var malGroup singleflight.Group
+
+// malWait caps how long a caller waits for a (possibly live, rate-limited) MAL lookup.
+const malWait = 400 * time.Millisecond
 
 func (m *Manager) MalID(ctx context.Context, mediaID int64) (int, error) {
 	if v, ok := malCache.Load(mediaID); ok {
 		return v.(int), nil
 	}
+
+	key := strconv.FormatInt(mediaID, 10)
+	done := make(chan struct{})
+	var result int
+	var resultErr error
+	go func() {
+		v, err, _ := malGroup.Do(key, func() (any, error) {
+			return m.fetchMalID(context.Background(), mediaID)
+		})
+		if err == nil {
+			result = v.(int)
+		} else {
+			resultErr = err
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return result, resultErr
+	case <-time.After(malWait):
+		return 0, nil
+	}
+}
+
+func (m *Manager) fetchMalID(ctx context.Context, mediaID int64) (int, error) {
 	al, _ := m.providers[DefaultProvider].(*AniList)
 
 	var anilistID string

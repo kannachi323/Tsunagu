@@ -1015,6 +1015,11 @@ func (s *Syncer) GetMedia(ctx context.Context, id int64) (sqlcgen.Medium, error)
 	return s.q.GetMedia(ctx, id)
 }
 
+// hydrateWait caps how long a request waits for a never-hydrated entry's
+// detail fetch; past that it serves what's in the DB and lets the fetch
+// keep running in the background for the next request to pick up.
+const hydrateWait = 400 * time.Millisecond
+
 func (s *Syncer) EnsureHydrated(ctx context.Context, sc *sandbox.SupervisedClient, id int64) (sqlcgen.Medium, error) {
 	m, err := s.q.GetMedia(ctx, id)
 	if err != nil {
@@ -1025,30 +1030,65 @@ func (s *Syncer) EnsureHydrated(ctx context.Context, sc *sandbox.SupervisedClien
 	}
 
 	lk := s.lockFor(fmt.Sprintf("hydrate:%d", id))
-	lk.Lock()
-	defer lk.Unlock()
-
-	m, err = s.q.GetMedia(ctx, id)
-	if err != nil {
-		return sqlcgen.Medium{}, err
+	if lk.TryLock() {
+		done := make(chan struct{})
+		go func() {
+			defer lk.Unlock()
+			defer close(done)
+			s.hydrateNow(context.Background(), sc, id)
+		}()
+		waitFor(done, hydrateWait)
+	} else {
+		waitForLock(lk, hydrateWait)
 	}
-	if m.DetailsFetchedAt.Valid {
-		return m, nil
-	}
 
+	if fresh, err := s.q.GetMedia(ctx, id); err == nil {
+		return fresh, nil
+	}
+	return m, nil
+}
+
+func waitFor(done <-chan struct{}, timeout time.Duration) {
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
+
+// waitForLock waits for lk to become available without taking it.
+func waitForLock(lk *sync.Mutex, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		lk.Lock()
+		lk.Unlock()
+		close(done)
+	}()
+	waitFor(done, timeout)
+}
+
+func (s *Syncer) hydrateNow(ctx context.Context, sc *sandbox.SupervisedClient, id int64) {
+	m, err := s.q.GetMedia(ctx, id)
+	if err != nil || m.DetailsFetchedAt.Valid {
+		return
+	}
 	ext, err := s.q.GetExtension(ctx, m.ExtensionID.Int64)
 	if err != nil {
-		return sqlcgen.Medium{}, fmt.Errorf("get extension %d: %w", m.ExtensionID.Int64, err)
+		log.Printf("hydrate media %d: get extension %d: %v", id, m.ExtensionID.Int64, err)
+		return
 	}
 	c, err := sc.Ensure(ctx)
 	if err != nil {
-		return sqlcgen.Medium{}, err
+		log.Printf("hydrate media %d: sandbox unavailable: %v", id, err)
+		return
 	}
 	details, err := c.GetDetails(ctx, ext.PackageName, m.ExternalID)
 	if err != nil {
-		return sqlcgen.Medium{}, fmt.Errorf("get details for %s/%s: %w", ext.PackageName, m.ExternalID, err)
+		log.Printf("hydrate media %d: get details for %s/%s: %v", id, ext.PackageName, m.ExternalID, err)
+		return
 	}
-	return s.upsertEntryFromDetails(ctx, c, ext, details)
+	if _, err := s.upsertEntryFromDetails(ctx, c, ext, details); err != nil {
+		log.Printf("hydrate media %d: %v", id, err)
+	}
 }
 
 func (s *Syncer) EnsureChapters(ctx context.Context, sc *sandbox.SupervisedClient, id int64) ([]sqlcgen.Chapter, error) {
@@ -1061,21 +1101,33 @@ func (s *Syncer) EnsureChapters(ctx context.Context, sc *sandbox.SupervisedClien
 	}
 
 	lk := s.lockFor(fmt.Sprintf("chapters:%d", id))
-	lk.Lock()
-	defer lk.Unlock()
-
-	m, err = s.q.GetMedia(ctx, id)
-	if err != nil {
-		return nil, err
+	if lk.TryLock() {
+		done := make(chan struct{})
+		go func() {
+			defer lk.Unlock()
+			defer close(done)
+			s.syncChaptersNow(context.Background(), sc, id)
+		}()
+		waitFor(done, hydrateWait)
+	} else {
+		waitForLock(lk, hydrateWait)
 	}
-	if m.ChaptersSyncedAt.Valid {
-		return s.q.ListChaptersByMedia(ctx, id)
+	return s.q.ListChaptersByMedia(ctx, id)
+}
+
+func (s *Syncer) syncChaptersNow(ctx context.Context, sc *sandbox.SupervisedClient, id int64) {
+	m, err := s.q.GetMedia(ctx, id)
+	if err != nil || m.ChaptersSyncedAt.Valid {
+		return
 	}
 	c, err := sc.Ensure(ctx)
 	if err != nil {
-		return nil, err
+		log.Printf("sync chapters media %d: sandbox unavailable: %v", id, err)
+		return
 	}
-	return s.SyncChapters(ctx, c, id)
+	if _, err := s.SyncChapters(ctx, c, id); err != nil {
+		log.Printf("sync chapters media %d: %v", id, err)
+	}
 }
 
 type LibraryQuery struct {
