@@ -76,6 +76,9 @@ func (r *chapterResolver) Pages(ctx context.Context, obj *model.Chapter) ([]stri
 		return nil, err
 	}
 	if n, err := LoadersFromContext(ctx).DownloadedPagesByChapter.Load(ctx, chID); err == nil && n > 0 {
+		if isPdf, perr := r.chapterIsPdf(ctx, chID); perr == nil && isPdf {
+			return pdfPageURLs(obj.MediaID, obj.ID, int(n)), nil
+		}
 		return contentPageURLs(obj.MediaID, obj.ID, int(n)), nil
 	}
 
@@ -107,6 +110,14 @@ func (r *chapterResolver) PageCount(ctx context.Context, obj *model.Chapter) (*i
 		return nil, err
 	}
 	return &n, nil
+}
+
+func (r *chapterResolver) PDFSource(ctx context.Context, obj *model.Chapter) (bool, error) {
+	chID, err := parseID(obj.ID)
+	if err != nil {
+		return false, err
+	}
+	return r.chapterIsPdf(ctx, chID)
 }
 
 func (r *chapterResolver) VideoURL(ctx context.Context, obj *model.Chapter) (*string, error) {
@@ -1228,6 +1239,21 @@ func (r *mutationResolver) DeleteLocalSeries(ctx context.Context, mediaID string
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *mutationResolver) RenameLocalSeries(ctx context.Context, mediaID string, newTitle string) (*model.Media, error) {
+	mid, err := parseID(mediaID)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.Ls.RenameLocalSeries(ctx, mid, newTitle); err != nil {
+		return nil, err
+	}
+	m, err := r.Q.GetMedia(ctx, mid)
+	if err != nil {
+		return nil, err
+	}
+	return toMedia(m, r.MediaDir), nil
 }
 
 func (r *mutationResolver) TrackerLogin(ctx context.Context, trackerKey string, token string) (*model.Tracker, error) {

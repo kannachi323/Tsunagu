@@ -129,3 +129,6 @@ UPDATE media SET title = ?, cover_local_path = COALESCE(?, cover_local_path) WHE
 
 -- name: DeleteMedia :exec
 DELETE FROM media WHERE id = ?;
+
+-- name: RenameLocalMedia :one
+UPDATE media SET title = ?, external_id = ? WHERE id = ? RETURNING *;

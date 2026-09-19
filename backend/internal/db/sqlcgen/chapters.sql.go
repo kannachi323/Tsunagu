@@ -1090,6 +1090,20 @@ func (q *Queries) SetNovelChapterContentPath(ctx context.Context, arg SetNovelCh
 	return err
 }
 
+const updateChapterExternalID = `-- name: UpdateChapterExternalID :exec
+UPDATE chapters SET external_id = ? WHERE id = ?
+`
+
+type UpdateChapterExternalIDParams struct {
+	ExternalID string `json:"external_id"`
+	ID         int64  `json:"id"`
+}
+
+func (q *Queries) UpdateChapterExternalID(ctx context.Context, arg UpdateChapterExternalIDParams) error {
+	_, err := q.db.ExecContext(ctx, updateChapterExternalID, arg.ExternalID, arg.ID)
+	return err
+}
+
 const upsertAnimeEpisodeStream = `-- name: UpsertAnimeEpisodeStream :exec
 INSERT INTO anime_episode_streams (chapter_id, stream_url, local_path)
 VALUES (?, ?, ?)

@@ -84,6 +84,7 @@ var textExts = map[string]bool{
 }
 var bookExts = map[string]bool{
 	".epub": true,
+	".docx": true,
 }
 var videoExts = map[string]bool{
 	".mp4": true, ".mkv": true, ".webm": true, ".m4v": true, ".avi": true, ".mov": true,
@@ -178,8 +179,10 @@ func (s *Scanner) ingestKind(ctx context.Context, kindDir, kindSegment, ct strin
 			case ct == "manga" && archiveExts[ext]:
 				name := strings.TrimSuffix(chapName, filepath.Ext(chapName))
 				created, linked, err = s.ingestArchiveChapter(ctx, media.ID, externalID, name, chapPath, idx)
-			case ct == "novel" && bookExts[ext]:
+			case ct == "novel" && ext == ".epub":
 				created, linked, err = s.ingestEpubBook(ctx, media.ID, externalID, chapPath, idx)
+			case ct == "novel" && ext == ".docx":
+				created, linked, err = s.ingestDocxBook(ctx, media.ID, externalID, chapPath, idx)
 			default:
 				created, linked, err = s.ingestChapter(ctx, media.ID, ct, externalID, chapName, chapPath, idx)
 			}
@@ -276,6 +279,22 @@ func (s *Scanner) ingestEpubBook(ctx context.Context, mediaID int64, mediaExtern
 		linked++
 	}
 	return created, linked, nil
+}
+
+func (s *Scanner) ingestDocxBook(ctx context.Context, mediaID int64, mediaExternalID, docxPath string, idx int) (created bool, linked int, err error) {
+	key := filepath.Base(docxPath)
+	title := strings.TrimSuffix(key, filepath.Ext(key))
+	ch, created, err := s.upsertChapterRowNamed(ctx, mediaID, mediaExternalID, key, title, idx)
+	if err != nil {
+		return created, 0, err
+	}
+	if err := s.q.UpsertNovelChapterContent(ctx, sqlcgen.UpsertNovelChapterContentParams{
+		ChapterID: ch.ID,
+		LocalPath: sql.NullString{String: DocxBookPath(docxPath), Valid: true},
+	}); err != nil {
+		return created, 0, err
+	}
+	return created, 1, nil
 }
 
 func (s *Scanner) ingestChapter(ctx context.Context, mediaID int64, ct, mediaExternalID, chapName, chapDir string, idx int) (created bool, linked int, err error) {
@@ -391,6 +410,10 @@ func gone(path string) bool {
 			return os.IsNotExist(err)
 		}
 		return !ArchiveHasEntry(archivePath, entryName)
+	}
+	if docxPath, ok := ParseDocxBookPath(path); ok {
+		_, err := os.Stat(docxPath)
+		return err != nil && os.IsNotExist(err)
 	}
 	_, err := os.Stat(path)
 	return err != nil && os.IsNotExist(err)

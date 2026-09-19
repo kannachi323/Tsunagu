@@ -531,6 +531,45 @@ func (q *Queries) RemoveMediaFromLibrary(ctx context.Context, id int64) (Medium,
 	return i, err
 }
 
+const renameLocalMedia = `-- name: RenameLocalMedia :one
+UPDATE media SET title = ?, external_id = ? WHERE id = ? RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at
+`
+
+type RenameLocalMediaParams struct {
+	Title      string `json:"title"`
+	ExternalID string `json:"external_id"`
+	ID         int64  `json:"id"`
+}
+
+func (q *Queries) RenameLocalMedia(ctx context.Context, arg RenameLocalMediaParams) (Medium, error) {
+	row := q.db.QueryRowContext(ctx, renameLocalMedia, arg.Title, arg.ExternalID, arg.ID)
+	var i Medium
+	err := row.Scan(
+		&i.ID,
+		&i.ExtensionID,
+		&i.ExtensionName,
+		&i.ExternalID,
+		&i.ContentType,
+		&i.Title,
+		&i.CoverPath,
+		&i.CoverLocalPath,
+		&i.Description,
+		&i.Status,
+		&i.Author,
+		&i.Artist,
+		&i.ExtensionRemovedAt,
+		&i.AddedAt,
+		&i.LastViewedAt,
+		&i.DetailsFetchedAt,
+		&i.UpdatedAt,
+		&i.ChaptersSyncedAt,
+		&i.CoverOverride,
+		&i.ContentBlockRank,
+		&i.MetadataSearchFailedAt,
+	)
+	return i, err
+}
+
 const setMediaCoverOverride = `-- name: SetMediaCoverOverride :one
 
 UPDATE media SET cover_override = ?, cover_local_path = NULL WHERE id = ? RETURNING id, extension_id, extension_name, external_id, content_type, title, cover_path, cover_local_path, description, status, author, artist, extension_removed_at, added_at, last_viewed_at, details_fetched_at, updated_at, chapters_synced_at, cover_override, content_block_rank, metadata_search_failed_at

@@ -73,6 +73,7 @@ type ComplexityRoot struct {
 		ID              func(childComplexity int) int
 		MediaID         func(childComplexity int) int
 		Number          func(childComplexity int) int
+		PDFSource       func(childComplexity int) int
 		PageCount       func(childComplexity int) int
 		Pages           func(childComplexity int) int
 		ReadingProgress func(childComplexity int) int
@@ -313,6 +314,7 @@ type ComplexityRoot struct {
 		RemoveContentFilterRule    func(childComplexity int, id string) int
 		RemoveMediaFromFolder      func(childComplexity int, mediaID string, folderID string) int
 		RenameFolder               func(childComplexity int, folderID string, name string) int
+		RenameLocalSeries          func(childComplexity int, mediaID string, newTitle string) int
 		RenameRepository           func(childComplexity int, repositoryID string, name string) int
 		ReorderDownload            func(childComplexity int, mediaID string, chapterID string, position int32) int
 		ReorderFolder              func(childComplexity int, folderID string, sortOrder int32) int
@@ -612,6 +614,7 @@ type ChapterResolver interface {
 	Download(ctx context.Context, obj *model.Chapter) (*model.Download, error)
 	Pages(ctx context.Context, obj *model.Chapter) ([]string, error)
 	PageCount(ctx context.Context, obj *model.Chapter) (*int32, error)
+	PDFSource(ctx context.Context, obj *model.Chapter) (bool, error)
 	VideoURL(ctx context.Context, obj *model.Chapter) (*string, error)
 	VideoStream(ctx context.Context, obj *model.Chapter) (*model.VideoStream, error)
 }
@@ -695,6 +698,7 @@ type MutationResolver interface {
 	RefetchMediaCover(ctx context.Context, mediaID string) (*model.Media, error)
 	RescanLocalMedia(ctx context.Context) ([]*model.Media, error)
 	DeleteLocalSeries(ctx context.Context, mediaID string) (bool, error)
+	RenameLocalSeries(ctx context.Context, mediaID string, newTitle string) (*model.Media, error)
 	TrackerLogin(ctx context.Context, trackerKey string, token string) (*model.Tracker, error)
 	TrackerLogout(ctx context.Context, trackerKey string) (bool, error)
 	BindTrack(ctx context.Context, mediaID string, trackerKey string, remoteID string) (*model.TrackLink, error)
@@ -878,6 +882,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Chapter.Number(childComplexity), true
+	case "Chapter.pdfSource":
+		if e.ComplexityRoot.Chapter.PDFSource == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Chapter.PDFSource(childComplexity), true
 	case "Chapter.pageCount":
 		if e.ComplexityRoot.Chapter.PageCount == nil {
 			break
@@ -2177,6 +2187,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.RenameFolder(childComplexity, args["folderId"].(string), args["name"].(string)), true
+	case "Mutation.renameLocalSeries":
+		if e.ComplexityRoot.Mutation.RenameLocalSeries == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_renameLocalSeries_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.RenameLocalSeries(childComplexity, args["mediaId"].(string), args["newTitle"].(string)), true
 	case "Mutation.renameRepository":
 		if e.ComplexityRoot.Mutation.RenameRepository == nil {
 			break
@@ -3847,6 +3868,8 @@ func (ec *executionContext) childFields_Chapter(ctx context.Context, field graph
 		return ec.fieldContext_Chapter_pages(ctx, field)
 	case "pageCount":
 		return ec.fieldContext_Chapter_pageCount(ctx, field)
+	case "pdfSource":
+		return ec.fieldContext_Chapter_pdfSource(ctx, field)
 	case "videoUrl":
 		return ec.fieldContext_Chapter_videoUrl(ctx, field)
 	case "videoStream":
@@ -5380,6 +5403,28 @@ func (ec *executionContext) field_Mutation_renameFolder_args(ctx context.Context
 		return nil, err
 	}
 	args["name"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_renameLocalSeries_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "mediaId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["mediaId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "newTitle",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["newTitle"] = arg1
 	return args, nil
 }
 
@@ -7076,6 +7121,29 @@ func (ec *executionContext) _Chapter_pageCount(ctx context.Context, field graphq
 }
 func (ec *executionContext) fieldContext_Chapter_pageCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Chapter", field, true, true, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _Chapter_pdfSource(ctx context.Context, field graphql.CollectedField, obj *model.Chapter) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Chapter_pdfSource(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Chapter().PDFSource(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Chapter_pdfSource(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Chapter", field, true, true, errors.New("field of type Boolean does not have child fields"))
 }
 
 func (ec *executionContext) _Chapter_videoUrl(ctx context.Context, field graphql.CollectedField, obj *model.Chapter) (ret graphql.Marshaler) {
@@ -12657,6 +12725,50 @@ func (ec *executionContext) fieldContext_Mutation_deleteLocalSeries(ctx context.
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_deleteLocalSeries_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_renameLocalSeries(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_renameLocalSeries(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().RenameLocalSeries(ctx, fc.Args["mediaId"].(string), fc.Args["newTitle"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *model.Media) graphql.Marshaler {
+			return ec.marshalNMedia2ᚖtsunaguᚋbackendᚋinternalᚋapiᚋgraphᚋmodelᚐMedia(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_renameLocalSeries(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Media(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_renameLocalSeries_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -19987,6 +20099,44 @@ func (ec *executionContext) _Chapter(ctx context.Context, sel ast.SelectionSet, 
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "pdfSource":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Chapter_pdfSource(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "videoUrl":
 			field := field
 
@@ -22304,6 +22454,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "deleteLocalSeries":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_deleteLocalSeries(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "renameLocalSeries":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_renameLocalSeries(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++

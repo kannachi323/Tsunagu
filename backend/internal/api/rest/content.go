@@ -98,9 +98,58 @@ func (h *ContentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveSubtitle(w, r, chapterID)
 	case "text":
 		h.serveText(w, r, chapterID)
+	case "pdf":
+		h.servePdf(w, r, chapterID)
+	case "docx":
+		h.serveDocx(w, r, chapterID)
 	default:
 		http.Error(w, "unknown content type", http.StatusNotFound)
 	}
+}
+
+func (h *ContentHandler) servePdf(w http.ResponseWriter, r *http.Request, chapterID int64) {
+	rows, err := h.Q.ListMangaPages(r.Context(), chapterID)
+	if err != nil {
+		http.Error(w, "chapter not found", http.StatusNotFound)
+		return
+	}
+	for _, row := range rows {
+		if !row.LocalPath.Valid {
+			continue
+		}
+		archivePath, _, ok := localsource.ParseZipPagePath(row.LocalPath.String)
+		if !ok || strings.ToLower(filepath.Ext(archivePath)) != ".pdf" {
+			continue
+		}
+		if _, statErr := os.Stat(archivePath); statErr != nil {
+			continue
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.ServeFile(w, r, archivePath)
+		return
+	}
+	http.Error(w, "pdf not found", http.StatusNotFound)
+}
+
+func (h *ContentHandler) serveDocx(w http.ResponseWriter, r *http.Request, chapterID int64) {
+	row, err := h.Q.GetNovelChapterContent(r.Context(), chapterID)
+	if err != nil || !row.LocalPath.Valid {
+		http.Error(w, "docx not found", http.StatusNotFound)
+		return
+	}
+	docxPath, ok := localsource.ParseDocxBookPath(row.LocalPath.String)
+	if !ok {
+		http.Error(w, "not a docx chapter", http.StatusNotFound)
+		return
+	}
+	if _, statErr := os.Stat(docxPath); statErr != nil {
+		http.Error(w, "docx not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, docxPath)
 }
 
 func (h *ContentHandler) servePage(w http.ResponseWriter, r *http.Request, chapterID int64, pageNumber int) {
@@ -1215,6 +1264,12 @@ func (h *ContentHandler) serveText(w http.ResponseWriter, r *http.Request, chapt
 	ctx := r.Context()
 
 	if row, err := h.Q.GetNovelChapterContent(ctx, chapterID); err == nil && row.LocalPath.Valid && row.LocalPath.String != "" {
+		if _, ok := localsource.ParseDocxBookPath(row.LocalPath.String); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"docxSource":true}`))
+			return
+		}
+
 		var data []byte
 		var rerr error
 		entryPath := row.LocalPath.String

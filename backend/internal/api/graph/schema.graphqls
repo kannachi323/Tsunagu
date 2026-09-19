@@ -246,6 +246,7 @@ type Chapter {
   download: Download @goField(forceResolver: true)
   pages: [String!] @goField(forceResolver: true)
   pageCount: Int @goField(forceResolver: true)
+  pdfSource: Boolean! @goField(forceResolver: true)
   videoUrl: String @goField(forceResolver: true)
 
   videoStream: VideoStream @goField(forceResolver: true)
@@ -586,6 +587,7 @@ type Mutation {
 
   rescanLocalMedia: [Media!]!
   deleteLocalSeries(mediaId: ID!): Boolean!
+  renameLocalSeries(mediaId: ID!, newTitle: String!): Media!
 
   trackerLogin(trackerKey: String!, token: String!): Tracker!
   trackerLogout(trackerKey: String!): Boolean!

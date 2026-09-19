@@ -22,3 +22,16 @@ func ParseZipPagePath(p string) (archivePath, entryName string, ok bool) {
 	}
 	return rest[:i], rest[i+1:], true
 }
+
+// A DOCX book's local_path is a virtual "docx://<path>" URL — the whole
+// document is converted to HTML on read, there's no archive entry to name.
+const docxPrefix = "docx://"
+
+func DocxBookPath(docxPath string) string {
+	return docxPrefix + docxPath
+}
+
+func ParseDocxBookPath(p string) (docxPath string, ok bool) {
+	rest, found := strings.CutPrefix(p, docxPrefix)
+	return rest, found
+}

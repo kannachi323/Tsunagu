@@ -133,13 +133,7 @@ func ReadArchiveEntry(archivePath, entryName string) ([]byte, error) {
 func ServeArchiveEntry(w io.Writer, setHeaders func(name string, size int64), archivePath, entryName string) bool {
 	switch kindOf(archivePath) {
 	case archivePdf:
-		data, ext, err := extractPdfPageImage(archivePath, entryName)
-		if err != nil {
-			return false
-		}
-		setHeaders("page"+ext, int64(len(data)))
-		_, _ = w.Write(data)
-		return true
+		return false
 
 	case archiveRar:
 		rr, err := rardecode.OpenReader(archivePath)

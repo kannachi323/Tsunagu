@@ -52,6 +52,7 @@ type Chapter struct {
 	Download        *Download        `json:"download,omitempty"`
 	Pages           []string         `json:"pages,omitempty"`
 	PageCount       *int32           `json:"pageCount,omitempty"`
+	PDFSource       bool             `json:"pdfSource"`
 	VideoURL        *string          `json:"videoUrl,omitempty"`
 	VideoStream     *VideoStream     `json:"videoStream,omitempty"`
 }

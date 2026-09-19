@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"tsunagu/backend/internal/contentfilter"
 	"tsunagu/backend/internal/db/sqlcgen"
 	"tsunagu/backend/internal/flaresolverr"
+	"tsunagu/backend/internal/localsource"
 	"tsunagu/backend/internal/metadata"
 	sandboxv1 "tsunagu/backend/internal/sandbox/gen/sandbox/v1"
 	"tsunagu/backend/internal/tracker"
@@ -644,6 +646,28 @@ func contentPageURLs(mediaID, chapterID string, count int) []string {
 		out = append(out, fmt.Sprintf("/content/%s/%s/pages/%d", mediaID, chapterID, i))
 	}
 	return out
+}
+
+// pdfPageURLs builds sentinel page URLs for a PDF-backed chapter — the
+// frontend recognizes the /pdfpage/ segment and renders these client-side
+// via PDF.js instead of fetching them, since there's no server-rendered
+// image behind them (see content.go's /pdf route, which serves the raw
+// file once for the client to render from).
+func pdfPageURLs(mediaID, chapterID string, count int) []string {
+	out := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		out = append(out, fmt.Sprintf("/content/%s/%s/pdfpage/%d", mediaID, chapterID, i))
+	}
+	return out
+}
+
+func (r *Resolver) chapterIsPdf(ctx context.Context, chapterID int64) (bool, error) {
+	pages, err := r.Q.ListMangaPages(ctx, chapterID)
+	if err != nil || len(pages) == 0 || !pages[0].LocalPath.Valid {
+		return false, err
+	}
+	archivePath, _, ok := localsource.ParseZipPagePath(pages[0].LocalPath.String)
+	return ok && strings.ToLower(filepath.Ext(archivePath)) == ".pdf", nil
 }
 
 func (r *Resolver) resolveExtension(ctx context.Context, extensionID string) (sqlcgen.Extension, error) {

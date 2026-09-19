@@ -154,6 +154,7 @@ type Querier interface {
 	RemoveMediaFromLibrary(ctx context.Context, id int64) (Medium, error)
 	RemoveTagFromMedia(ctx context.Context, arg RemoveTagFromMediaParams) error
 	RenameFolder(ctx context.Context, arg RenameFolderParams) (Folder, error)
+	RenameLocalMedia(ctx context.Context, arg RenameLocalMediaParams) (Medium, error)
 	RequeueOrphanedDownloads(ctx context.Context) error
 	RetryDownload(ctx context.Context, id int64) (Download, error)
 	SetAnimeEpisodeStreamPath(ctx context.Context, arg SetAnimeEpisodeStreamPathParams) error
@@ -169,6 +170,7 @@ type Querier interface {
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	TouchMediaViewed(ctx context.Context, id int64) error
 	TouchRepositorySync(ctx context.Context, id int64) error
+	UpdateChapterExternalID(ctx context.Context, arg UpdateChapterExternalIDParams) error
 	UpdateDownloadProgress(ctx context.Context, arg UpdateDownloadProgressParams) error
 	UpdateDownloadStats(ctx context.Context, arg UpdateDownloadStatsParams) error
 	UpdateExtensionIconLocalPath(ctx context.Context, arg UpdateExtensionIconLocalPathParams) error

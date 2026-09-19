@@ -39,6 +39,9 @@ GROUP BY media_id;
 -- name: GetChapterByMediaAndExternalID :one
 SELECT * FROM chapters WHERE media_id = ? AND external_id = ?;
 
+-- name: UpdateChapterExternalID :exec
+UPDATE chapters SET external_id = ? WHERE id = ?;
+
 -- name: NextUnreadChapterByMediaIDs :many
 
 SELECT c.*
