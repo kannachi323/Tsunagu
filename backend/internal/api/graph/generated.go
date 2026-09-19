@@ -267,8 +267,10 @@ type ComplexityRoot struct {
 	}
 
 	MigrateMangaFormatResult struct {
-		ChaptersMigrated func(childComplexity int) int
-		PagesMigrated    func(childComplexity int) int
+		ChaptersAlreadyTarget func(childComplexity int) int
+		ChaptersFailed        func(childComplexity int) int
+		ChaptersMigrated      func(childComplexity int) int
+		PagesMigrated         func(childComplexity int) int
 	}
 
 	Mutation struct {
@@ -1751,6 +1753,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.MetadataMatch.URL(childComplexity), true
 
+	case "MigrateMangaFormatResult.chaptersAlreadyTarget":
+		if e.ComplexityRoot.MigrateMangaFormatResult.ChaptersAlreadyTarget == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MigrateMangaFormatResult.ChaptersAlreadyTarget(childComplexity), true
+	case "MigrateMangaFormatResult.chaptersFailed":
+		if e.ComplexityRoot.MigrateMangaFormatResult.ChaptersFailed == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MigrateMangaFormatResult.ChaptersFailed(childComplexity), true
 	case "MigrateMangaFormatResult.chaptersMigrated":
 		if e.ComplexityRoot.MigrateMangaFormatResult.ChaptersMigrated == nil {
 			break
@@ -4183,6 +4197,10 @@ func (ec *executionContext) childFields_MigrateMangaFormatResult(ctx context.Con
 		return ec.fieldContext_MigrateMangaFormatResult_chaptersMigrated(ctx, field)
 	case "pagesMigrated":
 		return ec.fieldContext_MigrateMangaFormatResult_pagesMigrated(ctx, field)
+	case "chaptersFailed":
+		return ec.fieldContext_MigrateMangaFormatResult_chaptersFailed(ctx, field)
+	case "chaptersAlreadyTarget":
+		return ec.fieldContext_MigrateMangaFormatResult_chaptersAlreadyTarget(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type MigrateMangaFormatResult", field.Name)
 }
@@ -10339,6 +10357,52 @@ func (ec *executionContext) _MigrateMangaFormatResult_pagesMigrated(ctx context.
 	)
 }
 func (ec *executionContext) fieldContext_MigrateMangaFormatResult_pagesMigrated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MigrateMangaFormatResult", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _MigrateMangaFormatResult_chaptersFailed(ctx context.Context, field graphql.CollectedField, obj *model.MigrateMangaFormatResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MigrateMangaFormatResult_chaptersFailed(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ChaptersFailed, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int32) graphql.Marshaler {
+			return ec.marshalNInt2int32(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MigrateMangaFormatResult_chaptersFailed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MigrateMangaFormatResult", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _MigrateMangaFormatResult_chaptersAlreadyTarget(ctx context.Context, field graphql.CollectedField, obj *model.MigrateMangaFormatResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MigrateMangaFormatResult_chaptersAlreadyTarget(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ChaptersAlreadyTarget, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int32) graphql.Marshaler {
+			return ec.marshalNInt2int32(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MigrateMangaFormatResult_chaptersAlreadyTarget(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("MigrateMangaFormatResult", field, false, false, errors.New("field of type Int does not have child fields"))
 }
 
@@ -21798,6 +21862,16 @@ func (ec *executionContext) _MigrateMangaFormatResult(ctx context.Context, sel a
 			}
 		case "pagesMigrated":
 			out.Values[i] = ec._MigrateMangaFormatResult_pagesMigrated(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "chaptersFailed":
+			out.Values[i] = ec._MigrateMangaFormatResult_chaptersFailed(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "chaptersAlreadyTarget":
+			out.Values[i] = ec._MigrateMangaFormatResult_chaptersAlreadyTarget(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

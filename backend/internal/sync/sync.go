@@ -975,9 +975,13 @@ func (s *Syncer) upsertEntryFromDetails(ctx context.Context, c *sandbox.Client, 
 		}
 	}
 
-	s.maybeEnrich(ctx, entry.ID)
+	// Backgrounded like the recompute call below -- AniList lookups can take
+	// up to the 15s timeout in maybeEnrich, and this runs inline in mutation
+	// resolvers (e.g. ResolveMedia), so leaving it synchronous stalls the
+	// HTTP response on every newly-added entry.
+	id := entry.ID
+	go s.maybeEnrich(context.Background(), id)
 	if s.recompute != nil {
-		id := entry.ID
 		go func() { _ = s.recompute.RecomputeMedia(context.Background(), id) }()
 	}
 	if refreshed, err := s.q.GetMedia(ctx, entry.ID); err == nil {

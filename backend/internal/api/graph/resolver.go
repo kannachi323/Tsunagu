@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
+	"time"
 
+	"tsunagu/backend/internal/api/graph/model"
 	"tsunagu/backend/internal/auth"
 	"tsunagu/backend/internal/config"
 	"tsunagu/backend/internal/contentfilter"
@@ -16,12 +19,12 @@ import (
 	"tsunagu/backend/internal/sandbox"
 	sandboxv1 "tsunagu/backend/internal/sandbox/gen/sandbox/v1"
 	"tsunagu/backend/internal/streamresolve"
-	"tsunagu/backend/internal/sync"
+	syncpkg "tsunagu/backend/internal/sync"
 	"tsunagu/backend/internal/tracker"
 )
 
 type Resolver struct {
-	Sy        *sync.Syncer
+	Sy        *syncpkg.Syncer
 	Sc        *sandbox.SupervisedClient
 	Dm        *download.Manager
 	Ls        *localsource.Scanner
@@ -38,6 +41,10 @@ type Resolver struct {
 	Name      string
 	Version   string
 	BuildTime string
+
+	storageInfoMu      sync.Mutex
+	storageInfoCache   *model.StorageInfo
+	storageInfoCacheAt time.Time
 }
 
 func (r *Resolver) validateChapterMedia(ctx context.Context, mediaID, chapterID int64) (sqlcgen.Chapter, error) {

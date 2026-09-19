@@ -279,8 +279,10 @@ type MetadataMatch struct {
 }
 
 type MigrateMangaFormatResult struct {
-	ChaptersMigrated int32 `json:"chaptersMigrated"`
-	PagesMigrated    int32 `json:"pagesMigrated"`
+	ChaptersMigrated      int32 `json:"chaptersMigrated"`
+	PagesMigrated         int32 `json:"pagesMigrated"`
+	ChaptersFailed        int32 `json:"chaptersFailed"`
+	ChaptersAlreadyTarget int32 `json:"chaptersAlreadyTarget"`
 }
 
 type Mutation struct {

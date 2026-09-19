@@ -252,48 +252,6 @@ func (q *Queries) GetAnimeEpisodeStream(ctx context.Context, chapterID int64) (A
 	return i, err
 }
 
-const getAnyDownloadedAnimePathForMedia = `-- name: GetAnyDownloadedAnimePathForMedia :one
-SELECT a.local_path FROM anime_episode_streams a
-JOIN chapters c ON c.id = a.chapter_id
-WHERE c.media_id = ? AND a.local_path IS NOT NULL AND a.local_path != ''
-LIMIT 1
-`
-
-func (q *Queries) GetAnyDownloadedAnimePathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error) {
-	row := q.db.QueryRowContext(ctx, getAnyDownloadedAnimePathForMedia, mediaID)
-	var local_path sql.NullString
-	err := row.Scan(&local_path)
-	return local_path, err
-}
-
-const getAnyDownloadedMangaPathForMedia = `-- name: GetAnyDownloadedMangaPathForMedia :one
-SELECT mp.local_path FROM manga_pages mp
-JOIN chapters c ON c.id = mp.chapter_id
-WHERE c.media_id = ? AND mp.local_path IS NOT NULL AND mp.local_path != ''
-LIMIT 1
-`
-
-func (q *Queries) GetAnyDownloadedMangaPathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error) {
-	row := q.db.QueryRowContext(ctx, getAnyDownloadedMangaPathForMedia, mediaID)
-	var local_path sql.NullString
-	err := row.Scan(&local_path)
-	return local_path, err
-}
-
-const getAnyDownloadedNovelPathForMedia = `-- name: GetAnyDownloadedNovelPathForMedia :one
-SELECT nc.local_path FROM novel_chapter_content nc
-JOIN chapters c ON c.id = nc.chapter_id
-WHERE c.media_id = ? AND nc.local_path IS NOT NULL AND nc.local_path != ''
-LIMIT 1
-`
-
-func (q *Queries) GetAnyDownloadedNovelPathForMedia(ctx context.Context, mediaID int64) (sql.NullString, error) {
-	row := q.db.QueryRowContext(ctx, getAnyDownloadedNovelPathForMedia, mediaID)
-	var local_path sql.NullString
-	err := row.Scan(&local_path)
-	return local_path, err
-}
-
 const getChapter = `-- name: GetChapter :one
 SELECT id, media_id, external_id, title, number, uploaded_at, source_order, first_seen_at, scanlator FROM chapters WHERE id = ?
 `
@@ -527,6 +485,150 @@ func (q *Queries) ListAllNovelContentPaths(ctx context.Context) ([]NovelChapterC
 	for rows.Next() {
 		var i NovelChapterContent
 		if err := rows.Scan(&i.ChapterID, &i.LocalPath); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAnyDownloadedAnimePathsForMediaIDs = `-- name: ListAnyDownloadedAnimePathsForMediaIDs :many
+SELECT media_id, local_path FROM (
+  SELECT c.media_id AS media_id, a.local_path AS local_path,
+         ROW_NUMBER() OVER (PARTITION BY c.media_id ORDER BY a.chapter_id) AS rn
+  FROM anime_episode_streams a
+  JOIN chapters c ON c.id = a.chapter_id
+  WHERE c.media_id IN (/*SLICE:media_ids*/?) AND a.local_path IS NOT NULL AND a.local_path != ''
+) WHERE rn = 1
+`
+
+type ListAnyDownloadedAnimePathsForMediaIDsRow struct {
+	MediaID   int64          `json:"media_id"`
+	LocalPath sql.NullString `json:"local_path"`
+}
+
+func (q *Queries) ListAnyDownloadedAnimePathsForMediaIDs(ctx context.Context, mediaIds []int64) ([]ListAnyDownloadedAnimePathsForMediaIDsRow, error) {
+	query := listAnyDownloadedAnimePathsForMediaIDs
+	var queryParams []interface{}
+	if len(mediaIds) > 0 {
+		for _, v := range mediaIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:media_ids*/?", strings.Repeat(",?", len(mediaIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:media_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAnyDownloadedAnimePathsForMediaIDsRow{}
+	for rows.Next() {
+		var i ListAnyDownloadedAnimePathsForMediaIDsRow
+		if err := rows.Scan(&i.MediaID, &i.LocalPath); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAnyDownloadedMangaPathsForMediaIDs = `-- name: ListAnyDownloadedMangaPathsForMediaIDs :many
+SELECT media_id, local_path FROM (
+  SELECT c.media_id AS media_id, mp.local_path AS local_path,
+         ROW_NUMBER() OVER (PARTITION BY c.media_id ORDER BY mp.chapter_id, mp.page_number) AS rn
+  FROM manga_pages mp
+  JOIN chapters c ON c.id = mp.chapter_id
+  WHERE c.media_id IN (/*SLICE:media_ids*/?) AND mp.local_path IS NOT NULL AND mp.local_path != ''
+) WHERE rn = 1
+`
+
+type ListAnyDownloadedMangaPathsForMediaIDsRow struct {
+	MediaID   int64          `json:"media_id"`
+	LocalPath sql.NullString `json:"local_path"`
+}
+
+func (q *Queries) ListAnyDownloadedMangaPathsForMediaIDs(ctx context.Context, mediaIds []int64) ([]ListAnyDownloadedMangaPathsForMediaIDsRow, error) {
+	query := listAnyDownloadedMangaPathsForMediaIDs
+	var queryParams []interface{}
+	if len(mediaIds) > 0 {
+		for _, v := range mediaIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:media_ids*/?", strings.Repeat(",?", len(mediaIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:media_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAnyDownloadedMangaPathsForMediaIDsRow{}
+	for rows.Next() {
+		var i ListAnyDownloadedMangaPathsForMediaIDsRow
+		if err := rows.Scan(&i.MediaID, &i.LocalPath); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAnyDownloadedNovelPathsForMediaIDs = `-- name: ListAnyDownloadedNovelPathsForMediaIDs :many
+SELECT media_id, local_path FROM (
+  SELECT c.media_id AS media_id, nc.local_path AS local_path,
+         ROW_NUMBER() OVER (PARTITION BY c.media_id ORDER BY nc.chapter_id) AS rn
+  FROM novel_chapter_content nc
+  JOIN chapters c ON c.id = nc.chapter_id
+  WHERE c.media_id IN (/*SLICE:media_ids*/?) AND nc.local_path IS NOT NULL AND nc.local_path != ''
+) WHERE rn = 1
+`
+
+type ListAnyDownloadedNovelPathsForMediaIDsRow struct {
+	MediaID   int64          `json:"media_id"`
+	LocalPath sql.NullString `json:"local_path"`
+}
+
+func (q *Queries) ListAnyDownloadedNovelPathsForMediaIDs(ctx context.Context, mediaIds []int64) ([]ListAnyDownloadedNovelPathsForMediaIDsRow, error) {
+	query := listAnyDownloadedNovelPathsForMediaIDs
+	var queryParams []interface{}
+	if len(mediaIds) > 0 {
+		for _, v := range mediaIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:media_ids*/?", strings.Repeat(",?", len(mediaIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:media_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAnyDownloadedNovelPathsForMediaIDsRow{}
+	for rows.Next() {
+		var i ListAnyDownloadedNovelPathsForMediaIDsRow
+		if err := rows.Scan(&i.MediaID, &i.LocalPath); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

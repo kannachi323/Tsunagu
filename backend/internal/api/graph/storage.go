@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"tsunagu/backend/internal/api/graph/model"
@@ -13,29 +14,57 @@ import (
 	"tsunagu/backend/internal/image"
 )
 
+// storageInfoCacheTTL bounds how often the (potentially several) full
+// directory walks below re-run -- on a large media dir each walk can take
+// seconds, and the frontend polls/re-fetches this on every page load.
+const storageInfoCacheTTL = 20 * time.Second
+
 func (r *Resolver) storageInfoModel() (*model.StorageInfo, error) {
+	r.storageInfoMu.Lock()
+	if r.storageInfoCache != nil && time.Since(r.storageInfoCacheAt) < storageInfoCacheTTL {
+		cached := r.storageInfoCache
+		r.storageInfoMu.Unlock()
+		return cached, nil
+	}
+	r.storageInfoMu.Unlock()
+
 	c := r.Cfg.Config()
 	cats := r.storageCats()
-	out := make([]*model.StorageCategory, 0, len(cats))
-	var used int64
-	for _, cat := range cats {
-		var b int64
-		var n int
-		var err error
-		if cat.key == "downloads" {
-			b, n, err = r.downloadsSizeCount()
-		} else {
-			b, n, err = pathSizeCount(cat.key, cat.path)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("sizing %s: %w", cat.key, err)
-		}
-		used += b
-		out = append(out, &model.StorageCategory{
-			Key: cat.key, Label: cat.label, Path: cat.path,
-			Bytes: float64(b), FileCount: int32(n), Clearable: cat.clearable,
-		})
+	out := make([]*model.StorageCategory, len(cats))
+	errs := make([]error, len(cats))
+	var wg sync.WaitGroup
+	for i, cat := range cats {
+		wg.Add(1)
+		go func(i int, cat storageCat) {
+			defer wg.Done()
+			var b int64
+			var n int
+			var err error
+			if cat.key == "downloads" {
+				b, n, err = r.downloadsSizeCount()
+			} else {
+				b, n, err = pathSizeCount(cat.key, cat.path)
+			}
+			if err != nil {
+				errs[i] = fmt.Errorf("sizing %s: %w", cat.key, err)
+				return
+			}
+			out[i] = &model.StorageCategory{
+				Key: cat.key, Label: cat.label, Path: cat.path,
+				Bytes: float64(b), FileCount: int32(n), Clearable: cat.clearable,
+			}
+		}(i, cat)
 	}
+	wg.Wait()
+
+	var used int64
+	for i, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+		used += int64(out[i].Bytes)
+	}
+
 	total, free, err := diskStats(r.MediaDir)
 	if err != nil {
 		return nil, fmt.Errorf("disk stats: %w", err)
@@ -53,7 +82,7 @@ func (r *Resolver) storageInfoModel() (*model.StorageInfo, error) {
 	if abs, err := filepath.Abs(dbPath); err == nil {
 		dbPath = abs
 	}
-	return &model.StorageInfo{
+	info := &model.StorageInfo{
 		UsedBytes:    float64(used),
 		TotalBytes:   float64(total),
 		FreeBytes:    float64(free),
@@ -61,7 +90,20 @@ func (r *Resolver) storageInfoModel() (*model.StorageInfo, error) {
 		MediaDir:     r.MediaDir,
 		DatabasePath: dbPath,
 		Categories:   out,
-	}, nil
+	}
+
+	r.storageInfoMu.Lock()
+	r.storageInfoCache = info
+	r.storageInfoCacheAt = time.Now()
+	r.storageInfoMu.Unlock()
+
+	return info, nil
+}
+
+func (r *Resolver) invalidateStorageInfoCache() {
+	r.storageInfoMu.Lock()
+	r.storageInfoCache = nil
+	r.storageInfoMu.Unlock()
 }
 
 func toDatabaseBackup(b backup.Info) *model.DatabaseBackup {
@@ -179,6 +221,7 @@ func (r *Resolver) createBackup(ctx context.Context) (backup.Info, error) {
 }
 
 func (r *Resolver) clearCategory(ctx context.Context, key string) error {
+	defer r.invalidateStorageInfoCache()
 	cats := r.storageCats()
 	var cat *storageCat
 	for i := range cats {

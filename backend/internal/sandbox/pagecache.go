@@ -38,6 +38,17 @@ func pageListGet(key string) ([]string, bool) {
 func pageListPut(key string, urls []string) {
 	pageListMu.Lock()
 	pageListStore[key] = pageListEntry{urls: urls, at: time.Now()}
+	// Every chapter ever fetched otherwise stays in the map for the life of
+	// the process -- sweep expired entries opportunistically on write so a
+	// long-running server with a large library doesn't leak this unbounded.
+	if len(pageListStore)%64 == 0 {
+		now := time.Now()
+		for k, e := range pageListStore {
+			if now.Sub(e.at) > pageListTTL {
+				delete(pageListStore, k)
+			}
+		}
+	}
 	pageListMu.Unlock()
 }
 

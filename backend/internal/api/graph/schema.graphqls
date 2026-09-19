@@ -373,6 +373,8 @@ type RelocateLocalSourceResult {
 type MigrateMangaFormatResult {
   chaptersMigrated: Int!
   pagesMigrated: Int!
+  chaptersFailed: Int!
+  chaptersAlreadyTarget: Int!
 }
 
 type StorageCategory {

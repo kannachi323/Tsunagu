@@ -129,23 +129,32 @@ WHERE local_path IS NOT NULL AND local_path != '';
 SELECT chapter_id, local_path FROM anime_episode_streams
 WHERE local_path IS NOT NULL AND local_path != '';
 
--- name: GetAnyDownloadedMangaPathForMedia :one
-SELECT mp.local_path FROM manga_pages mp
-JOIN chapters c ON c.id = mp.chapter_id
-WHERE c.media_id = ? AND mp.local_path IS NOT NULL AND mp.local_path != ''
-LIMIT 1;
+-- name: ListAnyDownloadedMangaPathsForMediaIDs :many
+SELECT media_id, local_path FROM (
+  SELECT c.media_id AS media_id, mp.local_path AS local_path,
+         ROW_NUMBER() OVER (PARTITION BY c.media_id ORDER BY mp.chapter_id, mp.page_number) AS rn
+  FROM manga_pages mp
+  JOIN chapters c ON c.id = mp.chapter_id
+  WHERE c.media_id IN (sqlc.slice('media_ids')) AND mp.local_path IS NOT NULL AND mp.local_path != ''
+) WHERE rn = 1;
 
--- name: GetAnyDownloadedNovelPathForMedia :one
-SELECT nc.local_path FROM novel_chapter_content nc
-JOIN chapters c ON c.id = nc.chapter_id
-WHERE c.media_id = ? AND nc.local_path IS NOT NULL AND nc.local_path != ''
-LIMIT 1;
+-- name: ListAnyDownloadedNovelPathsForMediaIDs :many
+SELECT media_id, local_path FROM (
+  SELECT c.media_id AS media_id, nc.local_path AS local_path,
+         ROW_NUMBER() OVER (PARTITION BY c.media_id ORDER BY nc.chapter_id) AS rn
+  FROM novel_chapter_content nc
+  JOIN chapters c ON c.id = nc.chapter_id
+  WHERE c.media_id IN (sqlc.slice('media_ids')) AND nc.local_path IS NOT NULL AND nc.local_path != ''
+) WHERE rn = 1;
 
--- name: GetAnyDownloadedAnimePathForMedia :one
-SELECT a.local_path FROM anime_episode_streams a
-JOIN chapters c ON c.id = a.chapter_id
-WHERE c.media_id = ? AND a.local_path IS NOT NULL AND a.local_path != ''
-LIMIT 1;
+-- name: ListAnyDownloadedAnimePathsForMediaIDs :many
+SELECT media_id, local_path FROM (
+  SELECT c.media_id AS media_id, a.local_path AS local_path,
+         ROW_NUMBER() OVER (PARTITION BY c.media_id ORDER BY a.chapter_id) AS rn
+  FROM anime_episode_streams a
+  JOIN chapters c ON c.id = a.chapter_id
+  WHERE c.media_id IN (sqlc.slice('media_ids')) AND a.local_path IS NOT NULL AND a.local_path != ''
+) WHERE rn = 1;
 
 -- name: DeleteMangaPage :exec
 DELETE FROM manga_pages WHERE chapter_id = ? AND page_number = ?;

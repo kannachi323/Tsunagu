@@ -119,12 +119,20 @@ func FetchIndex(indexURL string) ([]ParsedExtension, error) {
 		return nil, fetchErrorf("failed to fetch %s: HTTP %d", indexURL, resp.StatusCode)
 	}
 
-	rawBytes, err := io.ReadAll(resp.Body)
+	// Repo indexes are JSON extension listings, never legitimately huge; cap
+	// both the raw fetch and the decompressed size so a misconfigured or
+	// malicious repo URL can't force an unbounded allocation.
+	const maxIndexBytes = 32 << 20
+
+	rawBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexBytes+1))
 	if err != nil {
 		return nil, fetchErrorf("failed to read response from %s: %v", indexURL, err)
 	}
 	if len(rawBytes) == 0 {
 		return nil, fetchErrorf("empty response body from %s", indexURL)
+	}
+	if len(rawBytes) > maxIndexBytes {
+		return nil, fetchErrorf("response from %s exceeds %d bytes", indexURL, maxIndexBytes)
 	}
 
 	data := rawBytes
@@ -134,9 +142,12 @@ func FetchIndex(indexURL string) ([]ParsedExtension, error) {
 			return nil, fetchErrorf("failed to gunzip %s: %v", indexURL, err)
 		}
 		defer gz.Close()
-		unzipped, err := io.ReadAll(gz)
+		unzipped, err := io.ReadAll(io.LimitReader(gz, maxIndexBytes+1))
 		if err != nil {
 			return nil, fetchErrorf("failed to gunzip %s: %v", indexURL, err)
+		}
+		if len(unzipped) > maxIndexBytes {
+			return nil, fetchErrorf("decompressed response from %s exceeds %d bytes", indexURL, maxIndexBytes)
 		}
 		data = unzipped
 	}

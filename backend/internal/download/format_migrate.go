@@ -16,8 +16,10 @@ import (
 )
 
 type MigrateFormatResult struct {
-	ChaptersMigrated int64
-	PagesMigrated    int64
+	ChaptersMigrated      int64
+	PagesMigrated         int64
+	ChaptersFailed        int64
+	ChaptersAlreadyTarget int64
 }
 
 // MigrateMangaFormat repacks every already-downloaded manga chapter between
@@ -50,6 +52,7 @@ func (m *Manager) MigrateMangaFormat(ctx context.Context, target string) (Migrat
 
 		_, _, isArchive := localsource.ParseZipPagePath(pages[0].LocalPath.String)
 		if (target == "cbz") == isArchive {
+			res.ChaptersAlreadyTarget++
 			continue
 		}
 
@@ -61,11 +64,15 @@ func (m *Manager) MigrateMangaFormat(ctx context.Context, target string) (Migrat
 		}
 		if migrateErr != nil {
 			log.Printf("download: migrating chapter %d to %s failed: %v", chapterID, target, migrateErr)
+			res.ChaptersFailed++
 			continue
 		}
+		log.Printf("download: migrated chapter %d to %s (%d pages)", chapterID, target, len(pages))
 		res.ChaptersMigrated++
 		res.PagesMigrated += int64(len(pages))
 	}
+	log.Printf("download: format migration to %s done -- %d chapters migrated, %d pages, %d already %s, %d failed",
+		target, res.ChaptersMigrated, res.PagesMigrated, res.ChaptersAlreadyTarget, target, res.ChaptersFailed)
 
 	return res, nil
 }
@@ -129,7 +136,9 @@ func (m *Manager) packChapterToCBZ(ctx context.Context, chapterID int64, pages [
 	}
 
 	for _, p := range pages {
-		_ = os.Remove(p.LocalPath.String)
+		if err := os.Remove(p.LocalPath.String); err != nil && !os.IsNotExist(err) {
+			log.Printf("download: migrating chapter %d to cbz: failed removing old page %s: %v", chapterID, p.LocalPath.String, err)
+		}
 	}
 	m.removeEmptyDirs(chapterDir)
 	return nil

@@ -2,10 +2,12 @@ package graph
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/vikstrous/dataloadgen"
 
 	"tsunagu/backend/internal/db/sqlcgen"
+	"tsunagu/backend/internal/localsource"
 )
 
 type Loaders struct {
@@ -28,6 +30,8 @@ type Loaders struct {
 	DownloadedPagesByChapter *dataloadgen.Loader[int64, int32]
 
 	DownloadedByChapter *dataloadgen.Loader[int64, bool]
+
+	DownloadFolderPathByMedia *dataloadgen.Loader[int64, *string]
 }
 
 type loadersCtxKey struct{}
@@ -51,6 +55,8 @@ func NewLoaders(q *sqlcgen.Queries) *Loaders {
 		LatestDownloadByChapter:  dataloadgen.NewLoader(latestDownloadByChapterFn(q)),
 		DownloadedPagesByChapter: dataloadgen.NewLoader(downloadedPagesByChapterFn(q)),
 		DownloadedByChapter:      dataloadgen.NewLoader(downloadedByChapterFn(q)),
+
+		DownloadFolderPathByMedia: dataloadgen.NewLoader(downloadFolderPathByMediaFn(q)),
 	}
 }
 
@@ -407,6 +413,65 @@ func trackLinksByMediaFn(q *sqlcgen.Queries) func(context.Context, []int64) ([][
 		out := make([][]sqlcgen.TrackerLink, len(keys))
 		for i, k := range keys {
 			out[i] = m[k]
+		}
+		return out, nil
+	}
+}
+
+func downloadFolderPathByMediaFn(q *sqlcgen.Queries) func(context.Context, []int64) ([]*string, []error) {
+	return func(ctx context.Context, keys []int64) ([]*string, []error) {
+		out := make([]*string, len(keys))
+
+		mangaRows, err := q.ListAnyDownloadedMangaPathsForMediaIDs(ctx, keys)
+		if err != nil {
+			return out, repeatErr(err, len(keys))
+		}
+		manga := make(map[int64]string, len(mangaRows))
+		for _, r := range mangaRows {
+			if r.LocalPath.Valid {
+				manga[r.MediaID] = r.LocalPath.String
+			}
+		}
+
+		novelRows, err := q.ListAnyDownloadedNovelPathsForMediaIDs(ctx, keys)
+		if err != nil {
+			return out, repeatErr(err, len(keys))
+		}
+		novel := make(map[int64]string, len(novelRows))
+		for _, r := range novelRows {
+			if r.LocalPath.Valid {
+				novel[r.MediaID] = r.LocalPath.String
+			}
+		}
+
+		animeRows, err := q.ListAnyDownloadedAnimePathsForMediaIDs(ctx, keys)
+		if err != nil {
+			return out, repeatErr(err, len(keys))
+		}
+		anime := make(map[int64]string, len(animeRows))
+		for _, r := range animeRows {
+			if r.LocalPath.Valid {
+				anime[r.MediaID] = r.LocalPath.String
+			}
+		}
+
+		for i, k := range keys {
+			switch {
+			case manga[k] != "":
+				var folder string
+				if archivePath, _, ok := localsource.ParseZipPagePath(manga[k]); ok {
+					folder = filepath.Dir(archivePath)
+				} else {
+					folder = filepath.Dir(filepath.Dir(manga[k]))
+				}
+				out[i] = &folder
+			case novel[k] != "":
+				folder := filepath.Dir(novel[k])
+				out[i] = &folder
+			case anime[k] != "":
+				folder := filepath.Dir(anime[k])
+				out[i] = &folder
+			}
 		}
 		return out, nil
 	}
