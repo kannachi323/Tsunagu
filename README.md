@@ -26,3 +26,22 @@ Neither is required for local/loopback use — auth only matters once the server
 
 - **Mihon/Tachiyomi-format export** (`.tachibk`) — `exportMihonBackup`/`importMihonBackup` mutations. Manga/novel library only; anime is never included, since the format has no concept of it.
 - **SQLite snapshots** — `createDatabaseBackup`/`deleteDatabaseBackup` mutations, plus automatic scheduled snapshots via `backup_interval_hours`/`backup_retention_count` in `tsunagu.toml`.
+
+## Acknowledgements
+
+Tsunagu's sandbox reimplements the Tachiyomi/Mihon extension API so
+third-party manga and anime extensions run unmodified in our own JVM
+process, and its backup format is interchangeable with Mihon's. Its overall
+shape — a headless JVM extension host exposed to a non-JVM backend — follows
+the approach pioneered by Suwayomi.
+
+- **[Mihon](https://github.com/mihonapp/mihon)** (Tachiyomi's successor) — manga extension API and backup format. Apache License 2.0.
+- **[Aniyomi](https://github.com/aniyomiorg/aniyomi)** — anime extension API. Apache License 2.0.
+- **[Suwayomi](https://github.com/Suwayomi/Suwayomi-Server)** — architectural reference for the sandbox/backend split; no code copied. Mozilla Public License 2.0.
+
+See [`NOTICE.md`](NOTICE.md) for exactly which files are adapted from where,
+and [`THIRD_PARTY_LICENSES/`](THIRD_PARTY_LICENSES/) for full license texts.
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE).
