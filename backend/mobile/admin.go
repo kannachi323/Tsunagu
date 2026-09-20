@@ -12,11 +12,73 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"tsunagu/backend/internal/automation"
+	"tsunagu/backend/internal/contentfilter"
 )
 
 func (b *Backend) mountAdmin(mux *http.ServeMux) {
 	r := b.services
+	mux.HandleFunc("/api/mobile/source-overrides", func(w http.ResponseWriter, req *http.Request) {
+		switch req.Method {
+		case "GET":
+			value, err := contentfilter.LoadSourceOverrides(req.Context(), r.DB)
+			if err != nil {
+				http.Error(w, "Could not read overrides", 500)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(value)
+		case "PUT":
+			var value contentfilter.SourceOverrides
+			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 131072))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&value); err != nil {
+				http.Error(w, "Invalid overrides", 400)
+				return
+			}
+			if err := contentfilter.SaveSourceOverrides(req.Context(), r.DB, value); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			w.WriteHeader(204)
+		default:
+			w.WriteHeader(405)
+		}
+	})
 	policies := r.Policies
+	mux.HandleFunc("/api/mobile/automation-controls", func(w http.ResponseWriter, req *http.Request) {
+		switch req.Method {
+		case "GET":
+			value, err := policies.Controls(req.Context())
+			if err != nil {
+				http.Error(w, "Could not read automation controls", 500)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(value)
+		case "PUT":
+			var value automation.Controls
+			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1024))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&value); err != nil {
+				http.Error(w, "Invalid controls", 400)
+				return
+			}
+			if err := policies.SetControls(req.Context(), value); err != nil {
+				http.Error(w, "Could not save controls", 500)
+				return
+			}
+			w.WriteHeader(204)
+		case "DELETE":
+			if err := policies.ResetOverrides(req.Context()); err != nil {
+				http.Error(w, "Could not reset overrides", 500)
+				return
+			}
+			w.WriteHeader(204)
+		default:
+			w.WriteHeader(405)
+		}
+	})
 	mux.HandleFunc("/api/mobile/automation", func(w http.ResponseWriter, req *http.Request) {
 		media, err := strconv.ParseInt(req.URL.Query().Get("mediaId"), 10, 64)
 		if err != nil || media < 0 {
@@ -25,7 +87,7 @@ func (b *Backend) mountAdmin(mux *http.ServeMux) {
 		}
 		switch req.Method {
 		case "GET":
-			p, err := policies.Policy(req.Context(), media)
+			p, err := policies.SavedPolicy(req.Context(), media)
 			if err != nil {
 				http.Error(w, err.Error(), 400)
 				return
@@ -38,6 +100,16 @@ func (b *Backend) mountAdmin(mux *http.ServeMux) {
 				err = policies.SetPolicy(req.Context(), media, raw)
 			}
 			if err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			w.WriteHeader(204)
+		case "DELETE":
+			if media == 0 {
+				http.Error(w, "choose a series", 400)
+				return
+			}
+			if err := policies.SetPolicy(req.Context(), media, []byte(`{}`)); err != nil {
 				http.Error(w, err.Error(), 400)
 				return
 			}

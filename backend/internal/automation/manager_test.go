@@ -179,3 +179,67 @@ func TestFutureDeletionActionsDoNotStarveDueActions(t *testing.T) {
 		t.Fatal("stale action starved behind future actions")
 	}
 }
+
+func TestControlsPreserveEditableRulesAndResetOverrides(t *testing.T) {
+	m, _ := fixture(t)
+	ctx := context.Background()
+	if err := m.SetPolicy(ctx, 0, []byte(`{"downloadAhead":2,"refreshInterval":"daily"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetPolicy(ctx, 1, []byte(`{"downloadAhead":7}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetControls(ctx, Controls{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := m.Policy(ctx, 1)
+	if err != nil || p.DownloadAhead != 0 || !p.PauseUpdates {
+		t.Fatalf("disabled: %+v %v", p, err)
+	}
+	p, err = m.SavedPolicy(ctx, 1)
+	if err != nil || p.DownloadAhead != 7 {
+		t.Fatalf("saved: %+v %v", p, err)
+	}
+	if err := m.SetControls(ctx, Controls{Enabled: true, EnforceGlobal: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, err = m.Policy(ctx, 1)
+	if err != nil || p.DownloadAhead != 2 {
+		t.Fatalf("enforced: %+v %v", p, err)
+	}
+	if err := m.ResetOverrides(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p, err = m.SavedPolicy(ctx, 1)
+	if err != nil || p.DownloadAhead != 2 || p.RefreshInterval != "daily" {
+		t.Fatalf("reset: %+v %v", p, err)
+	}
+}
+
+func TestEnforcedGlobalDeletionIgnoresLongerSeriesDelay(t *testing.T) {
+	m, conn := fixture(t)
+	ctx := context.Background()
+	now := time.Unix(100000, 0)
+	m.Now = func() time.Time { return now }
+	for scope, raw := range map[int64]string{0: `{"deleteOnRead":false,"deleteDelayHours":1}`, 1: `{"deleteOnRead":true,"deleteDelayHours":168}`} {
+		if err := m.SetPolicy(ctx, scope, []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := conn.Exec(`INSERT INTO reading_progress(media_id,chapter_id,progress,completed) VALUES(1,1,1,1); INSERT INTO automation_actions(chapter_id,completed_at) VALUES(1,92800)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetControls(ctx, Controls{Enabled: true, EnforceGlobal: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := conn.QueryRow("SELECT count(*) FROM automation_actions").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("global deletion delay was blocked by series override")
+	}
+}

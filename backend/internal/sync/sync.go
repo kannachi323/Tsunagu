@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tsunagu/backend/internal/contentfilter"
 
 	"tsunagu/backend/internal/chapternum"
 	"tsunagu/backend/internal/db/sqlcgen"
@@ -1208,9 +1209,26 @@ func (s *Syncer) QueryLibrary(ctx context.Context, q LibraryQuery) ([]sqlcgen.Me
 		}
 		args = append(args, len(q.GenreIDs))
 	}
+	overrides, err := contentfilter.LoadSourceOverrides(ctx, s.db)
+	if err != nil {
+		return nil, 0, err
+	}
+	if overrides.Enabled && len(overrides.Blocked) > 0 {
+		where = append(where, "(m.extension_id IS NULL OR m.extension_id NOT IN ("+strings.TrimSuffix(strings.Repeat("?,", len(overrides.Blocked)), ",")+"))")
+		for _, id := range overrides.Blocked {
+			args = append(args, id)
+		}
+	}
 	if q.ContentFilterRank > 0 {
-		where = append(where, "(m.content_block_rank IS NULL OR m.content_block_rank > ?)")
+		condition := "m.content_block_rank IS NULL OR m.content_block_rank > ?"
 		args = append(args, q.ContentFilterRank)
+		if overrides.Enabled && len(overrides.Allowed) > 0 {
+			condition += " OR m.extension_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(overrides.Allowed)), ",") + ")"
+			for _, id := range overrides.Allowed {
+				args = append(args, id)
+			}
+		}
+		where = append(where, "("+condition+")")
 	}
 	if q.UnreadOnly {
 		where = append(where, `EXISTS (

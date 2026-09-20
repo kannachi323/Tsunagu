@@ -35,9 +35,62 @@ type Manager struct {
 func New(db *sql.DB, q *sqlcgen.Queries, dm *download.Manager) *Manager {
 	return &Manager{db: db, q: q, dm: dm, Now: time.Now}
 }
+
+type Controls struct {
+	Enabled       bool `json:"enabled"`
+	EnforceGlobal bool `json:"enforceGlobal"`
+}
+
+func (m *Manager) Controls(ctx context.Context) (Controls, error) {
+	result := Controls{Enabled: true}
+	var raw string
+	err := m.db.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key='mobile_automation_controls'").Scan(&raw)
+	if err == sql.ErrNoRows {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	err = json.Unmarshal([]byte(raw), &result)
+	return result, err
+}
+func (m *Manager) SetControls(ctx context.Context, value Controls) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = m.db.ExecContext(ctx, "INSERT INTO app_settings(key,value) VALUES('mobile_automation_controls',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", string(raw))
+	return err
+}
+func (m *Manager) ResetOverrides(ctx context.Context) error {
+	_, err := m.db.ExecContext(ctx, "DELETE FROM automation_policies WHERE scope_id>0")
+	return err
+}
+
 func (m *Manager) Policy(ctx context.Context, media int64) (Policy, error) {
 	p := Policy{RefreshInterval: "manual"}
-	for _, id := range []int64{0, media} {
+	controls, err := m.Controls(ctx)
+	if err != nil {
+		return p, err
+	}
+	if media > 0 && !controls.Enabled {
+		p.PauseUpdates = true
+		return p, nil
+	}
+	return m.savedPolicy(ctx, media, controls.EnforceGlobal)
+}
+
+// SavedPolicy returns editable rules even when automation is disabled.
+func (m *Manager) SavedPolicy(ctx context.Context, media int64) (Policy, error) {
+	return m.savedPolicy(ctx, media, false)
+}
+func (m *Manager) savedPolicy(ctx context.Context, media int64, enforceGlobal bool) (Policy, error) {
+	p := Policy{RefreshInterval: "manual"}
+	scopes := []int64{0}
+	if media > 0 && !enforceGlobal {
+		scopes = append(scopes, media)
+	}
+	for _, id := range scopes {
 		var data string
 		err := m.db.QueryRowContext(ctx, "SELECT policy_json FROM automation_policies WHERE scope_id=?", id).Scan(&data)
 		if err == sql.ErrNoRows {
@@ -188,16 +241,20 @@ func (m *Manager) NewChapters(ctx context.Context, media int64, ids []int64) err
 	return nil
 }
 func (m *Manager) Tick(ctx context.Context) error {
+	controls, err := m.Controls(ctx)
+	if err != nil || !controls.Enabled {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rows, err := m.db.QueryContext(ctx, `SELECT a.chapter_id FROM automation_actions a
  JOIN chapters c ON c.id=a.chapter_id
- LEFT JOIN automation_policies p ON p.scope_id=c.media_id
+ LEFT JOIN automation_policies p ON p.scope_id=c.media_id AND ?=0
  LEFT JOIN automation_policies g ON g.scope_id=0
  WHERE NOT EXISTS(SELECT 1 FROM reading_progress r WHERE r.chapter_id=a.chapter_id AND r.completed=1)
  OR COALESCE(json_extract(p.policy_json,'$.deleteOnRead'),json_extract(g.policy_json,'$.deleteOnRead'),0)=0
  OR a.completed_at+3600*COALESCE(json_extract(p.policy_json,'$.deleteDelayHours'),json_extract(g.policy_json,'$.deleteDelayHours'),0)<=?
- ORDER BY a.completed_at,a.chapter_id LIMIT 100`, m.Now().Unix())
+ ORDER BY a.completed_at,a.chapter_id LIMIT 100`, controls.EnforceGlobal, m.Now().Unix())
 	if err != nil {
 		return err
 	}

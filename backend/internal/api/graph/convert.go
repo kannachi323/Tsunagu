@@ -799,9 +799,14 @@ func toProtoFilterNodes(ins []*model.FilterInput) []*sandboxv1.FilterNode {
 }
 
 func (r *Resolver) toSearchResponse(ctx context.Context, ext sqlcgen.Extension, resp *sandboxv1.SearchResponse) (*model.SearchResponse, error) {
+	overrides, err := contentfilter.LoadSourceOverrides(ctx, r.DB)
+	if err != nil {
+		return nil, err
+	}
+	decision := overrides.Decision(ext.ID)
 	results := make([]*model.Media, 0, len(resp.Results))
 	for _, res := range resp.Results {
-		if r.Cf != nil && !r.Cf.BrowseAllowed(res.Title, res.GetGenres()) {
+		if decision < 0 || (decision == 0 && r.Cf != nil && !r.Cf.BrowseAllowed(res.Title, res.GetGenres())) {
 			continue
 		}
 		row, err := r.Q.UpsertMediaBare(ctx, sqlcgen.UpsertMediaBareParams{
