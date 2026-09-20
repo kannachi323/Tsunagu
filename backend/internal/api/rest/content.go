@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -22,15 +23,18 @@ import (
 
 	"tsunagu/backend/internal/db/sqlcgen"
 	"tsunagu/backend/internal/localsource"
+	"tsunagu/backend/internal/proxyheader"
 	"tsunagu/backend/internal/sandbox"
 	sandboxv1 "tsunagu/backend/internal/sandbox/gen/sandbox/v1"
 	"tsunagu/backend/internal/streamresolve"
 )
 
 type ContentHandler struct {
-	Q  *sqlcgen.Queries
-	Sc *sandbox.SupervisedClient
-	Sr *streamresolve.Resolver
+	Segments *SegmentCache
+	Images   *MangaCache
+	Q        *sqlcgen.Queries
+	Sc       *sandbox.SupervisedClient
+	Sr       *streamresolve.Resolver
 }
 
 func (h *ContentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +157,7 @@ func (h *ContentHandler) servePage(w http.ResponseWriter, r *http.Request, chapt
 		return
 	}
 
-	data, ct, err := fetchMangaImage(ctx, client, dctx.ExtensionPackageName, urls[pageNumber-1])
+	data, ct, err := h.images().fetch(ctx, client, dctx.ExtensionPackageName, urls[pageNumber-1])
 	if err != nil {
 		http.Error(w, "fetching image failed", http.StatusBadGateway)
 		return
@@ -163,7 +167,7 @@ func (h *ContentHandler) servePage(w http.ResponseWriter, r *http.Request, chapt
 		if end > len(urls) {
 			end = len(urls)
 		}
-		prefetchMangaImages(client, dctx.ExtensionPackageName, urls[pageNumber:end])
+		h.images().prefetch(client, dctx.ExtensionPackageName, urls[pageNumber:end])
 	}
 
 	if ct == "" {
@@ -196,8 +200,8 @@ func (h *ContentHandler) prefetchChapter(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	h.images().Work.Go(func() {
+		ctx, cancel := context.WithTimeout(h.images().Work.Context, 25*time.Second)
 		defer cancel()
 		urls, err := client.GetPageURLs(ctx, dctx.ExtensionPackageName, dctx.SourceEntryID, dctx.SourceChapterID)
 		if err != nil {
@@ -207,8 +211,8 @@ func (h *ContentHandler) prefetchChapter(w http.ResponseWriter, r *http.Request,
 		if k > len(urls) {
 			k = len(urls)
 		}
-		prefetchMangaImages(client, dctx.ExtensionPackageName, urls[:k])
-	}()
+		h.images().prefetch(client, dctx.ExtensionPackageName, urls[:k])
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -588,8 +592,9 @@ func (h *ContentHandler) serveHLS(w http.ResponseWriter, r *http.Request, chapte
 	}
 	var headers map[string]string
 	if hp := r.URL.Query().Get("h"); hp != "" {
-		if hj, derr := base64.RawURLEncoding.DecodeString(hp); derr == nil {
-			_ = json.Unmarshal(hj, &headers)
+		if err := proxyheader.Decode(hp, &headers); err != nil {
+			http.Error(w, "invalid source header token", http.StatusBadRequest)
+			return
 		}
 	}
 	h.streamHLS(w, r, tgt, headers, chapterID)
@@ -605,7 +610,7 @@ func (h *ContentHandler) streamHLS(w http.ResponseWriter, r *http.Request, targe
 	isRanged := r.Header.Get("Range") != ""
 	looksSegment := !strings.Contains(strings.ToLower(target.Path), ".m3u8")
 	if looksSegment && !isRanged {
-		if b, ct, ok := streamSegments.get(target.String()); ok {
+		if b, ct, ok := h.segments().get(target.String()); ok {
 			writeCachedSegment(w, b, ct)
 			return
 		}
@@ -649,7 +654,7 @@ func (h *ContentHandler) streamHLS(w http.ResponseWriter, r *http.Request, targe
 
 func (h *ContentHandler) writeSegment(w http.ResponseWriter, r *http.Request, key string, resp *http.Response) {
 	respCT := resp.Header.Get("Content-Type")
-	cacheable := resp.StatusCode == http.StatusOK && r.Header.Get("Range") == ""
+	cacheable := resp.StatusCode == http.StatusOK && r.Header.Get("Range") == "" && resp.ContentLength <= segCacheMaxObject
 
 	for _, hk := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
 		if v := resp.Header.Get(hk); v != "" {
@@ -659,15 +664,47 @@ func (h *ContentHandler) writeSegment(w http.ResponseWriter, r *http.Request, ke
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(resp.StatusCode)
 
-	if !cacheable {
-		_, _ = io.Copy(w, resp.Body)
-		return
+	// Deliver bytes immediately. The cache limit limits retained memory, never
+	// the response body: large segments must still reach the player in full.
+	controller := http.NewResponseController(w)
+	var cached []byte
+	var delivered int64
+	buffer := make([]byte, 32<<10)
+	for {
+		n, readErr := resp.Body.Read(buffer)
+		if n > 0 {
+			written, writeErr := w.Write(buffer[:n])
+			delivered += int64(written)
+			if writeErr != nil || written != n {
+				panic(http.ErrAbortHandler)
+			}
+			if err := controller.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				panic(http.ErrAbortHandler)
+			}
+			if cacheable {
+				if len(cached)+n <= segCacheMaxObject {
+					cached = append(cached, buffer[:n]...)
+				} else {
+					cacheable = false
+					cached = nil
+				}
+			}
+		}
+		if readErr == io.EOF {
+			if resp.ContentLength >= 0 && delivered != resp.ContentLength {
+				panic(http.ErrAbortHandler)
+			}
+			if cacheable {
+				h.segments().put(key, cached, respCT)
+			}
+			return
+		}
+		if readErr != nil {
+			// An interrupted upstream response must not look complete or enter
+			// the cache. net/http closes the stream so AVPlayer can retry it.
+			panic(http.ErrAbortHandler)
+		}
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, segCacheMaxObject+1))
-	if err == nil && int64(len(body)) <= segCacheMaxObject {
-		streamSegments.put(key, body, respCT)
-	}
-	_, _ = w.Write(body)
 }
 
 func writeCachedSegment(w http.ResponseWriter, data []byte, ct string) {
@@ -851,8 +888,9 @@ func (h *ContentHandler) serveSubtitle(w http.ResponseWriter, r *http.Request, c
 	}
 	var headers map[string]string
 	if hp := r.URL.Query().Get("h"); hp != "" {
-		if hj, derr := base64.RawURLEncoding.DecodeString(hp); derr == nil {
-			_ = json.Unmarshal(hj, &headers)
+		if err := proxyheader.Decode(hp, &headers); err != nil {
+			http.Error(w, "invalid source header token", http.StatusBadRequest)
+			return
 		}
 	}
 
@@ -957,11 +995,7 @@ func encodeHeaderParam(headers map[string]string) string {
 	if len(headers) == 0 {
 		return ""
 	}
-	j, err := json.Marshal(headers)
-	if err != nil {
-		return ""
-	}
-	return base64.RawURLEncoding.EncodeToString(j)
+	return proxyheader.Encode(headers)
 }
 
 func dashSegmentBase(manifest *url.URL, headers map[string]string) string {
@@ -970,11 +1004,10 @@ func dashSegmentBase(manifest *url.URL, headers map[string]string) string {
 		dir.Path = dir.Path[:i+1]
 	}
 	dir.RawQuery, dir.Fragment = "", ""
-	payload, _ := json.Marshal(struct {
+	return proxyheader.Encode(struct {
 		B string            `json:"b"`
 		H map[string]string `json:"h,omitempty"`
 	}{B: dir.String(), H: headers})
-	return base64.RawURLEncoding.EncodeToString(payload)
 }
 
 var (
@@ -1007,16 +1040,11 @@ func (h *ContentHandler) serveDASH(w http.ResponseWriter, r *http.Request, rest 
 		http.Error(w, "bad dash path", http.StatusBadRequest)
 		return
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(rest[:slash])
-	if err != nil {
-		http.Error(w, "bad dash base", http.StatusBadRequest)
-		return
-	}
 	var blob struct {
 		B string            `json:"b"`
 		H map[string]string `json:"h"`
 	}
-	if err := json.Unmarshal(raw, &blob); err != nil {
+	if err := proxyheader.Decode(rest[:slash], &blob); err != nil {
 		http.Error(w, "bad dash base", http.StatusBadRequest)
 		return
 	}
@@ -1037,7 +1065,7 @@ func (h *ContentHandler) serveDASH(w http.ResponseWriter, r *http.Request, rest 
 	}
 
 	if r.Header.Get("Range") == "" {
-		if b, ct, ok := streamSegments.get(tgt.String()); ok {
+		if b, ct, ok := h.segments().get(tgt.String()); ok {
 			writeCachedSegment(w, b, ct)
 			return
 		}
@@ -1315,3 +1343,15 @@ func serveZipEntry(w http.ResponseWriter, archivePath, entryName string) bool {
 }
 
 var _ = sql.ErrNoRows
+
+// SegmentCache scopes adaptive media bytes to a backend instance.
+type SegmentCache struct{ *segCache }
+
+func NewSegmentCache(bytes int64) *SegmentCache { return &SegmentCache{newSegCache(bytes)} }
+func (c *SegmentCache) Clear()                  { c.clear() }
+func (h *ContentHandler) segments() *segCache {
+	if h.Segments != nil {
+		return h.Segments.segCache
+	}
+	return streamSegments
+}

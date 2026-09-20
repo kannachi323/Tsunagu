@@ -62,3 +62,11 @@ func (c *segCache) put(key string, data []byte, ct string) {
 		c.ll.Remove(back)
 	}
 }
+
+func (c *segCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m = map[string]*list.Element{}
+	c.ll.Init()
+	c.size = 0
+}
