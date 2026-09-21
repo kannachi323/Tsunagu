@@ -1,0 +1,49 @@
+# Maintainer: Tsunagu Project <https://github.com/moku-project/Tsunagu>
+
+# Builds the Tsunagu backend (Go API server + JVM extension sandbox) from the
+# latest tagged release.
+
+pkgname=tsunagu
+pkgver=0.4.1
+pkgrel=1
+pkgdesc='Self-hosted backend for manga, light novels, and anime (Moku backend)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/moku-project/Tsunagu'
+license=('Apache-2.0')
+depends=('java-runtime-headless>=21' 'ffmpeg')
+makedepends=('go' 'jdk21-openjdk' 'gradle')
+provides=('tsunagu')
+conflicts=('tsunagu-git')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/moku-project/Tsunagu/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "Tsunagu-$pkgver"
+
+  export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+  export CGO_ENABLED=0
+  export GOFLAGS='-mod=mod'
+
+  (cd backend && go build -trimpath \
+    -ldflags "-s -w -X main.serverVersion=$pkgver -X main.serverBuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o tsunagu ./cmd/server)
+
+  (cd sandbox && gradle --no-daemon shadowJar)
+}
+
+package() {
+  cd "Tsunagu-$pkgver"
+
+  install -Dm755 backend/tsunagu "$pkgdir/usr/lib/tsunagu/tsunagu"
+  install -Dm644 sandbox/build/libs/sandbox-*-all.jar \
+    "$pkgdir/usr/share/tsunagu/sandbox.jar"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/tsunagu" <<'EOF'
+#!/bin/sh
+export TSUNAGU_SANDBOX_JAR="${TSUNAGU_SANDBOX_JAR:-/usr/share/tsunagu/sandbox.jar}"
+exec /usr/lib/tsunagu/tsunagu "$@"
+EOF
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE.md "$pkgdir/usr/share/licenses/$pkgname/NOTICE.md"
+}

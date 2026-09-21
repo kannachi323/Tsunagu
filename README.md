@@ -13,6 +13,11 @@ GraphQL at `http://localhost:6007/api/graphql` (playground at `/api/graphql/play
 - `sandbox/` — JVM extension loader/executor
 - `proto/` — shared gRPC contract
 
+## Packaging
+
+- **Arch** — [`packaging/tsunagu`](packaging/tsunagu/PKGBUILD) (latest tagged release) or [`packaging/tsunagu-git`](packaging/tsunagu-git/PKGBUILD) (latest commit). Either installs `/usr/bin/tsunagu` plus the sandbox jar it needs. [Moku](https://github.com/moku-project/Moku)'s default `moku`/`moku-git` PKGBUILDs depend on these to bundle the backend automatically.
+- **Nix** — `nix build .#tsunagu` (see `nix/packages.nix`).
+
 ## Auth
 
 Two independent, optional gates in front of the API:
