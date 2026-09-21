@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -34,6 +35,22 @@ import java.io.File
 class ExtensionServiceImpl(
     private val registry: ExtensionRegistry,
 ) : ExtensionServiceGrpc.ExtensionServiceImplBase() {
+
+    override fun browserCookies(request: Sandbox.BrowserCookiesRequest, observer: StreamObserver<Sandbox.BrowserCookiesResponse>) {
+        try {
+            val url = request.url.toHttpUrlOrNull() ?: error("Invalid browser URL")
+            val store = org.koin.core.context.GlobalContext.get().get<eu.kanade.tachiyomi.network.NetworkHelper>().cookieStore
+            if (request.apply) {
+                require(request.stateJson.length < 262144)
+                val state = kotlinx.serialization.json.Json.decodeFromString<eu.kanade.tachiyomi.network.BrowserState>(request.stateJson)
+                store.addAll(url,state.cookies.map { it.cookie() })
+                store.setUserAgent(url,state.userAgent)
+            }
+            val state = eu.kanade.tachiyomi.network.BrowserState(store.get(url).map(eu.kanade.tachiyomi.network.BrowserCookie::from), store.userAgent(url).orEmpty())
+            observer.onNext(Sandbox.BrowserCookiesResponse.newBuilder().setStateJson(kotlinx.serialization.json.Json { encodeDefaults = true }.encodeToString(eu.kanade.tachiyomi.network.BrowserState.serializer(),state)).build())
+            observer.onCompleted()
+        } catch (e: Exception) { observer.onError(Status.INVALID_ARGUMENT.withDescription("Invalid browser session").asRuntimeException()) }
+    }
 
     private val logger = KotlinLogging.logger {}
 
@@ -467,8 +484,10 @@ class ExtensionServiceImpl(
         handle(responseObserver, request.extensionId) { source ->
             val chapter: SChapter = chapterStub(request.extensionId, request.sourceChapterId)
             val pages = runBlocking {
-                source.getPageList(chapter).map { page ->
-                    if (page.imageUrl == null) page.imageUrl = source.getImageUrl(page)
+                val pageList = source.getPageList(chapter)
+                val urls = resolvePageURLs(pageList) { source.getImageUrl(it) }
+                pageList.zip(urls).map { (page, url) ->
+                    page.imageUrl = url
                     source.resolveImageUrl(page)
                 }
             }
@@ -539,7 +558,7 @@ class ExtensionServiceImpl(
                     "audio=${videos.sumOf { it.audioTracks.size }} " +
                     "timestamps=${preferred.timestamps.size}"
             }
-            toStreamInfo(preferred, videos)
+            toStreamInfo(preferred, videos, source)
         }
     }
 
@@ -555,6 +574,8 @@ class ExtensionServiceImpl(
         val (client, headers) = when (val s = extension.source) {
             is HttpSource -> s.client to s.headers
             is AnimeHttpSource -> s.client to s.headers
+            is NovelPlugin -> org.koin.core.context.GlobalContext.get().get<eu.kanade.tachiyomi.network.NetworkHelper>().client to
+                okhttp3.Headers.Builder().add("Referer", s.site.trimEnd('/') + "/").build()
             else -> {
                 responseObserver.onError(internal(IllegalStateException("extension ${request.extensionId} has no HTTP client")))
                 return
@@ -565,7 +586,8 @@ class ExtensionServiceImpl(
                 client.newCall(GET(request.imageUrl, headers)).awaitSuccess()
             }
             val data = response.use { resp ->
-                val bytes = resp.body.bytes()
+                val bytes = resp.body.byteStream().use { it.readNBytes(32 * 1024 * 1024 + 1) }
+                require(bytes.size <= 32 * 1024 * 1024) { "source image exceeds 32 MiB" }
                 val contentType = resp.header("Content-Type") ?: "image/jpeg"
                 Sandbox.ImageData.newBuilder()
                     .setData(com.google.protobuf.ByteString.copyFrom(bytes))
@@ -798,16 +820,28 @@ class ExtensionServiceImpl(
             Sandbox.SubtitleTrack.newBuilder().setUrl(it.url).setLang(it.lang).build()
         }
 
-    private fun headerMap(video: Video): Map<String, String> =
-        video.headers?.let { h -> h.names().associateWith { h[it] ?: "" } } ?: emptyMap()
+    private fun headerMap(video: Video, source: AnimeHttpSource): Map<String, String> {
+        val headers = (video.headers?.let { h -> h.names().associateWith { h[it] ?: "" } } ?: emptyMap()).toMutableMap()
+        val url = video.videoUrl.toHttpUrlOrNull() ?: return headers
+        if (headers.keys.none { it.equals("Cookie", ignoreCase = true) }) {
+            val cookies = source.client.cookieJar.loadForRequest(url)
+            if (cookies.isNotEmpty()) headers["Cookie"] = cookies.joinToString("; ") { "${it.name}=${it.value}" }
+        }
+        val store = org.koin.core.context.GlobalContext.get().get<eu.kanade.tachiyomi.network.NetworkHelper>().cookieStore
+        store.userAgent(url)?.let { agent ->
+            headers.keys.filter { it.equals("User-Agent", ignoreCase = true) }.forEach(headers::remove)
+            headers["User-Agent"] = agent
+        }
+        return headers
+    }
 
-    private fun toStreamInfo(preferred: Video, all: List<Video>): Sandbox.StreamInfo {
+    private fun toStreamInfo(preferred: Video, all: List<Video>, source: AnimeHttpSource): Sandbox.StreamInfo {
         val builder = Sandbox.StreamInfo.newBuilder()
             .setStreamUrl(preferred.videoUrl)
             .setQuality(preferred.videoTitle)
 
         builder.addAllSubtitles(subtitleProtos(preferred))
-        headerMap(preferred).forEach { (k, v) -> builder.putHeaders(k, v) }
+        headerMap(preferred, source).forEach { (k, v) -> builder.putHeaders(k, v) }
 
         all.forEach { v ->
             val src = Sandbox.VideoSource.newBuilder()
@@ -816,7 +850,7 @@ class ExtensionServiceImpl(
                 .setResolution(parseResolution(v))
                 .setPreferred(v === preferred || v.preferred)
                 .addAllSubtitles(subtitleProtos(v))
-            headerMap(v).forEach { (k, value) -> src.putHeaders(k, value) }
+            headerMap(v, source).forEach { (k, value) -> src.putHeaders(k, value) }
             builder.addSources(src.build())
         }
 

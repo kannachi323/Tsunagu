@@ -21,6 +21,8 @@ func (w *logWriter) Write(p []byte) (int, error) {
 }
 
 type SupervisedClient struct {
+	embedded          bool
+	closed            bool
 	jarPath           string
 	port              int
 	extDir            string
@@ -69,8 +71,21 @@ func NewSupervised(cfg SupervisedConfig) *SupervisedClient {
 }
 
 func (sc *SupervisedClient) Ensure(ctx context.Context) (*Client, error) {
+	if sc == nil {
+		return nil, fmt.Errorf("source runtime is unavailable")
+	}
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+
+	if sc.closed {
+		return nil, fmt.Errorf("sandbox client is closed")
+	}
+	if sc.embedded {
+		if sc.client == nil {
+			return nil, fmt.Errorf("source runtime is still starting")
+		}
+		return sc.client, nil
+	}
 
 	sc.lastAccess = time.Now()
 
@@ -260,8 +275,19 @@ func (sc *SupervisedClient) killLocked() {
 }
 
 func (sc *SupervisedClient) Shutdown() {
-	close(sc.stopReaper)
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+	if sc.closed {
+		return
+	}
+	sc.closed = true
+	close(sc.stopReaper)
+	if sc.embedded {
+		if sc.client != nil {
+			sc.client.Close()
+			sc.client = nil
+		}
+		return
+	}
 	sc.killLocked()
 }

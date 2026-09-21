@@ -11,9 +11,11 @@ import (
 
 	"tsunagu/backend/internal/db/sqlcgen"
 	"tsunagu/backend/internal/image"
+	"tsunagu/backend/internal/sandbox"
 )
 
 type CoverProxyHandler struct {
+	Sc            *sandbox.SupervisedClient
 	Q             *sqlcgen.Queries
 	CoverCacheDir string
 }
@@ -75,7 +77,24 @@ func (h *CoverProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var localPath string
 	for _, u := range candidates {
-		if localPath, err = image.DownloadToFile(u, h.CoverCacheDir, destName); err == nil {
+		if h.Sc != nil && entry.ExtensionID.Valid && u == entry.CoverPath.String {
+			ext, extErr := h.Q.GetExtension(ctx, entry.ExtensionID.Int64)
+			if extErr != nil {
+				continue
+			}
+			client, clientErr := h.Sc.Ensure(ctx)
+			if clientErr != nil {
+				continue
+			}
+			img, imageErr := client.GetImageBytes(ctx, ext.PackageName, u)
+			if imageErr != nil {
+				continue
+			}
+			localPath, err = image.SaveBytesToFile(img.GetData(), img.GetContentType(), h.CoverCacheDir, destName)
+		} else {
+			localPath, err = image.DownloadToFileContext(r.Context(), u, h.CoverCacheDir, destName)
+		}
+		if err == nil {
 			break
 		}
 	}
@@ -129,7 +148,7 @@ func (h *RemoteCoverProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	destName := base64.URLEncoding.EncodeToString([]byte(upstreamURL))
-	localPath, err := image.DownloadToFile(upstreamURL, h.CoverCacheDir, destName)
+	localPath, err := image.DownloadToFileContext(r.Context(), upstreamURL, h.CoverCacheDir, destName)
 	if err != nil {
 		http.Error(w, "fetching cover failed", http.StatusBadGateway)
 		return

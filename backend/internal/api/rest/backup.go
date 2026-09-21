@@ -28,10 +28,12 @@ func (h *BackupImportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, 65<<20)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		http.Error(w, "invalid upload", http.StatusBadRequest)
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "missing file field", http.StatusBadRequest)

@@ -5,6 +5,7 @@ package sandbox.v1;
 option go_package = "tsunagu/backend/internal/sandbox/gen;sandboxv1";
 
 service ExtensionService {
+  rpc BrowserCookies(BrowserCookiesRequest) returns (BrowserCookiesResponse);
   rpc LoadExtensions(LoadExtensionsRequest) returns (ExtensionList);
   rpc ListLoadedExtensions(Empty) returns (ExtensionList);
   rpc UnloadExtension(ExtensionRequest) returns (Empty);
@@ -283,3 +284,6 @@ message SortFilter {
   int32 index = 3;
   bool ascending = 4;
 }
+
+message BrowserCookiesRequest { string url = 1; string state_json = 2; bool apply = 3; }
+message BrowserCookiesResponse { string state_json = 1; }

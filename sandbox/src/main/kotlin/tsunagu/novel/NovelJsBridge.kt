@@ -23,10 +23,10 @@ import org.jsoup.nodes.TextNode
 
 object NovelJsBridge {
 
-    private val client =
-        OkHttpClient.Builder()
-            .dns(buildSandboxDns(System.getenv("SANDBOX_DOH") ?: "off"))
-            .build()
+    private val client by lazy {
+        org.koin.core.context.GlobalContext.getOrNull()?.get<eu.kanade.tachiyomi.network.NetworkHelper>()?.client
+            ?: eu.kanade.tachiyomi.network.NetworkHelper().client
+    }
 
     const val REQUIRE_GLUE = """
         function __require(name) {
@@ -223,7 +223,7 @@ object NovelJsBridge {
     private fun fetchModule(wrapPromise: Value): ProxyObject = ProxyObject.fromMap(mapOf(
         "fetchApi" to ProxyExecutable { args -> wrapPromise.execute(doFetch(args)) },
         "fetchText" to ProxyExecutable { args ->
-            val text = try { rawFetch(args).body } catch (e: Exception) { "" }
+            val text = rawFetch(args).body
             wrapPromise.execute(text)
         },
     ))

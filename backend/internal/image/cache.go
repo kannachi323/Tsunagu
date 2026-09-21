@@ -1,7 +1,14 @@
 package image
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	_ "golang.org/x/image/webp"
+	stdimage "image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -24,8 +31,11 @@ func ExtFromContentType(ct string) string {
 }
 
 func DownloadToFile(url, destDir, destName string) (string, error) {
+	return DownloadToFileContext(context.Background(), url, destDir, destName)
+}
+func DownloadToFileContext(ctx context.Context, url, destDir, destName string) (string, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("fetching %s: %w", url, err)
 	}
@@ -39,33 +49,37 @@ func DownloadToFile(url, destDir, destName string) (string, error) {
 		return "", fmt.Errorf("fetching %s: status %d", url, resp.StatusCode)
 	}
 
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return "", fmt.Errorf("creating dir %s: %w", destDir, err)
-	}
-
-	ext := ExtFromContentType(resp.Header.Get("Content-Type"))
-	path := filepath.Join(destDir, destName+ext)
-
-	f, err := os.Create(path)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20+1))
 	if err != nil {
-		return "", fmt.Errorf("creating file %s: %w", path, err)
+		return "", err
 	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return "", fmt.Errorf("writing file %s: %w", path, err)
-	}
-	return path, nil
+	return SaveBytesToFile(data, resp.Header.Get("Content-Type"), destDir, destName)
 }
 
 func SaveBytesToFile(data []byte, contentType, destDir, destName string) (string, error) {
+	if err := Validate(data); err != nil {
+		return "", err
+	}
+	contentType = http.DetectContentType(data)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating dir %s: %w", destDir, err)
 	}
 	ext := ExtFromContentType(contentType)
 	path := filepath.Join(destDir, destName+ext)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", fmt.Errorf("writing file %s: %w", path, err)
+	file, err := os.CreateTemp(destDir, ".image-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(file.Name(), path); err != nil {
+		return "", err
 	}
 	return path, nil
 }
@@ -85,6 +99,29 @@ func ClearDir(dir string) error {
 		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
 			return fmt.Errorf("removing %s: %w", e.Name(), err)
 		}
+	}
+	return nil
+}
+
+// Limit transient decoder memory independently of the encoded-byte caches.
+var validationSlots = make(chan struct{}, 2)
+
+// Validate rejects corrupt images and decompression bombs before caching them.
+func Validate(data []byte) error {
+	if len(data) == 0 || len(data) > 32<<20 {
+		return fmt.Errorf("invalid image size")
+	}
+	config, _, err := stdimage.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("invalid source image: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 16<<20 {
+		return fmt.Errorf("image exceeds 16 megapixel decode limit")
+	}
+	validationSlots <- struct{}{}
+	defer func() { <-validationSlots }()
+	if _, _, err := stdimage.Decode(bytes.NewReader(data)); err != nil {
+		return fmt.Errorf("corrupt source image: %w", err)
 	}
 	return nil
 }

@@ -34,8 +34,11 @@ type Client struct {
 }
 
 func NewClient(addr string) (*Client, error) {
-	conn, err := grpc.NewClient(
-		addr,
+	return newClient(addr)
+}
+
+func newClient(addr string, extra ...grpc.DialOption) (*Client, error) {
+	options := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                20 * time.Second,
@@ -43,7 +46,8 @@ func NewClient(addr string) (*Client, error) {
 			PermitWithoutStream: true,
 		}),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`),
-	)
+	}
+	conn, err := grpc.NewClient(addr, append(options, extra...)...)
 	if err != nil {
 		return nil, fmt.Errorf("dial sandbox at %s: %w", addr, err)
 	}
@@ -180,4 +184,15 @@ func (c *Client) GetImageBytes(ctx context.Context, extensionID, imageURL string
 		ExtensionId: extensionID,
 		ImageUrl:    imageURL,
 	})
+}
+
+// BrowserCookies is only exposed through the authenticated native session bridge.
+func (c *Client) BrowserCookies(ctx context.Context, url, state string, apply bool) (string, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	response, err := c.rpc.BrowserCookies(ctx, &sandboxv1.BrowserCookiesRequest{Url: url, StateJson: state, Apply: apply})
+	if err != nil {
+		return "", err
+	}
+	return response.StateJson, nil
 }

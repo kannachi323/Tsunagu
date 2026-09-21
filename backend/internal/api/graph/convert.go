@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
@@ -23,6 +22,7 @@ import (
 	"tsunagu/backend/internal/flaresolverr"
 	"tsunagu/backend/internal/localsource"
 	"tsunagu/backend/internal/metadata"
+	"tsunagu/backend/internal/proxyheader"
 	sandboxv1 "tsunagu/backend/internal/sandbox/gen/sandbox/v1"
 	"tsunagu/backend/internal/tracker"
 )
@@ -414,9 +414,7 @@ func proxyResourceURL(route, mediaID, chapterID, absURL string, headers map[stri
 	q := url.Values{}
 	q.Set("u", base64.RawURLEncoding.EncodeToString([]byte(absURL)))
 	if len(headers) > 0 {
-		if j, err := json.Marshal(headers); err == nil {
-			q.Set("h", base64.RawURLEncoding.EncodeToString(j))
-		}
+		q.Set("h", proxyheader.Encode(headers))
 	}
 	return fmt.Sprintf("/content/%s/%s/%s?%s", mediaID, chapterID, route, q.Encode())
 }

@@ -15,6 +15,7 @@ import (
 
 	"tsunagu/backend/internal/anilistrl"
 	"tsunagu/backend/internal/db/sqlcgen"
+	"tsunagu/backend/internal/taskgroup"
 )
 
 type matchOutcome int
@@ -30,14 +31,18 @@ type Recomputer interface {
 }
 
 type Manager struct {
-	db        *sql.DB
-	q         *sqlcgen.Queries
-	providers map[string]Provider
-	recompute Recomputer
+	Work       *taskgroup.Group
+	malCache   sync.Map
+	malGroup   singleflight.Group
+	db         *sql.DB
+	q          *sqlcgen.Queries
+	providerMu sync.RWMutex
+	providers  map[string]Provider
+	recompute  Recomputer
 }
 
 func NewManager(db *sql.DB, q *sqlcgen.Queries) *Manager {
-	return &Manager{
+	return &Manager{Work: taskgroup.New(),
 		db: db,
 		q:  q,
 		providers: map[string]Provider{
@@ -70,7 +75,7 @@ func (m *Manager) AutoEnrich(ctx context.Context, mediaID int64) error {
 // (so the same title isn't re-searched every run) or to stop the batch
 // entirely on a rate limit, rather than hammering every remaining title.
 func (m *Manager) tryMatch(ctx context.Context, media sqlcgen.Medium) (matchOutcome, error) {
-	cands, err := m.providers[DefaultProvider].Search(ctx, media.Title, contentTypeOf(media))
+	cands, err := m.defaultProvider().Search(ctx, media.Title, contentTypeOf(media))
 	if err != nil {
 		log.Printf("metadata: auto search %q: %v", media.Title, err)
 		return matchOutcomeError, err
@@ -160,7 +165,7 @@ func (m *Manager) refreshSparseTags(ctx context.Context) {
 }
 
 func (m *Manager) Search(ctx context.Context, provider, query string, ct ContentType) ([]Candidate, error) {
-	p, ok := m.providers[provider]
+	p, ok := m.provider(provider)
 	if !ok {
 		return nil, fmt.Errorf("unknown metadata provider %q", provider)
 	}
@@ -168,7 +173,7 @@ func (m *Manager) Search(ctx context.Context, provider, query string, ct Content
 }
 
 func (m *Manager) Apply(ctx context.Context, mediaID int64, provider, providerID string) (sqlcgen.Medium, error) {
-	p, ok := m.providers[provider]
+	p, ok := m.provider(provider)
 	if !ok {
 		return sqlcgen.Medium{}, fmt.Errorf("unknown metadata provider %q", provider)
 	}
@@ -191,7 +196,7 @@ func (m *Manager) Refresh(ctx context.Context, mediaID int64) (sqlcgen.Medium, e
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return sqlcgen.Medium{}, err
 	}
-	cands, err := m.providers[DefaultProvider].Search(ctx, media.Title, contentTypeOf(media))
+	cands, err := m.defaultProvider().Search(ctx, media.Title, contentTypeOf(media))
 	if err != nil {
 		return sqlcgen.Medium{}, err
 	}
@@ -220,14 +225,11 @@ func (m *Manager) Link(ctx context.Context, mediaID int64) (*sqlcgen.MetadataLin
 	return &link, nil
 }
 
-var malCache sync.Map
-var malGroup singleflight.Group
-
 // malWait caps how long a caller waits for a (possibly live, rate-limited) MAL lookup.
 const malWait = 400 * time.Millisecond
 
 func (m *Manager) MalID(ctx context.Context, mediaID int64) (int, error) {
-	if v, ok := malCache.Load(mediaID); ok {
+	if v, ok := m.malCache.Load(mediaID); ok {
 		return v.(int), nil
 	}
 
@@ -235,9 +237,9 @@ func (m *Manager) MalID(ctx context.Context, mediaID int64) (int, error) {
 	done := make(chan struct{})
 	var result int
 	var resultErr error
-	go func() {
-		v, err, _ := malGroup.Do(key, func() (any, error) {
-			return m.fetchMalID(context.Background(), mediaID)
+	if !m.Work.Go(func() {
+		v, err, _ := m.malGroup.Do(key, func() (any, error) {
+			return m.fetchMalID(m.Work.Context, mediaID)
 		})
 		if err == nil {
 			result = v.(int)
@@ -245,7 +247,9 @@ func (m *Manager) MalID(ctx context.Context, mediaID int64) (int, error) {
 			resultErr = err
 		}
 		close(done)
-	}()
+	}) {
+		return 0, m.Work.Context.Err()
+	}
 
 	select {
 	case <-done:
@@ -256,7 +260,7 @@ func (m *Manager) MalID(ctx context.Context, mediaID int64) (int, error) {
 }
 
 func (m *Manager) fetchMalID(ctx context.Context, mediaID int64) (int, error) {
-	al, _ := m.providers[DefaultProvider].(*AniList)
+	al, _ := m.defaultProvider().(*AniList)
 
 	var anilistID string
 	if links, err := m.q.ListTrackerLinksByMedia(ctx, mediaID); err == nil {
@@ -273,7 +277,7 @@ func (m *Manager) fetchMalID(ctx context.Context, mediaID int64) (int, error) {
 					id = id[i+1:]
 				}
 				if n, err := strconv.Atoi(id); err == nil && n > 0 {
-					malCache.Store(mediaID, n)
+					m.malCache.Store(mediaID, n)
 					return n, nil
 				}
 			case "anilist":
@@ -295,7 +299,7 @@ func (m *Manager) fetchMalID(ctx context.Context, mediaID int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	malCache.Store(mediaID, mal)
+	m.malCache.Store(mediaID, mal)
 	return mal, nil
 }
 
@@ -364,7 +368,7 @@ func (m *Manager) applyCandidate(ctx context.Context, mediaID int64, provider st
 		return sqlcgen.Medium{}, err
 	}
 	if m.recompute != nil {
-		go func() { _ = m.recompute.RecomputeMedia(context.Background(), mediaID) }()
+		m.Work.Go(func() { _ = m.recompute.RecomputeMedia(m.Work.Context, mediaID) })
 	}
 	return updated, nil
 }

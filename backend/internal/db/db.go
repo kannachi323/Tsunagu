@@ -70,6 +70,12 @@ var migration0016 string
 //go:embed migrations/0017_reading_progress_and_chapter_order_index.sql
 var migration0017 string
 
+//go:embed migrations/0018_service_automation.sql
+var migration0018 string
+
+//go:embed migrations/0019_repair_anime_episode_identifiers.sql
+var migration0019 string
+
 var migrations = []struct {
 	name string
 	sql  string
@@ -91,6 +97,8 @@ var migrations = []struct {
 	{"0015_metadata_search_cooldown.sql", migration0015},
 	{"0016_chapter_latest_index.sql", migration0016},
 	{"0017_reading_progress_and_chapter_order_index.sql", migration0017},
+	{"0018_service_automation.sql", migration0018},
+	{"0019_repair_anime_episode_identifiers.sql", migration0019},
 }
 
 func Open(path string) (*sql.DB, error) {

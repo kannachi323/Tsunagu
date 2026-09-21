@@ -2,73 +2,92 @@ package rest
 
 import (
 	"context"
-	"time"
-
-	"tsunagu/backend/internal/sandbox"
-
 	"golang.org/x/sync/singleflight"
+	"time"
+	"tsunagu/backend/internal/image"
+	"tsunagu/backend/internal/sandbox"
+	"tsunagu/backend/internal/taskgroup"
 )
 
-var (
-	mangaImages     = newSegCache(384 << 20)
-	mangaImageGroup singleflight.Group
-	prefetchSem     = make(chan struct{}, 6)
-)
-
-func mangaImageKey(extensionID, url string) string {
-	return extensionID + "\x00" + url
+type MangaCache struct {
+	images *segCache
+	group  singleflight.Group
+	slots  chan struct{}
+	Work   *taskgroup.Group
 }
 
-func fetchMangaImage(ctx context.Context, client *sandbox.Client, extensionID, url string) ([]byte, string, error) {
+func NewMangaCache(bytes int64, prefetch int) *MangaCache {
+	return &MangaCache{images: newSegCache(bytes), slots: make(chan struct{}, prefetch), Work: taskgroup.New()}
+}
+
+var desktopMangaCache = NewMangaCache(384<<20, 6)
+
+func (h *ContentHandler) images() *MangaCache {
+	if h.Images != nil {
+		return h.Images
+	}
+	return desktopMangaCache
+}
+func mangaImageKey(extensionID, url string) string { return extensionID + "\x00" + url }
+func (m *MangaCache) fetch(ctx context.Context, client *sandbox.Client, extensionID, url string) ([]byte, string, error) {
 	key := mangaImageKey(extensionID, url)
-	if data, ct, ok := mangaImages.get(key); ok {
+	if data, ct, ok := m.images.get(key); ok {
 		return data, ct, nil
 	}
-	v, err, _ := mangaImageGroup.Do(key, func() (any, error) {
-		if data, ct, ok := mangaImages.get(key); ok {
-			return [2]any{data, ct}, nil
+	result := m.group.DoChan(key, func() (any, error) {
+		var value any
+		var fetchErr error
+		if !m.Work.Run(func() { value, fetchErr = m.fetchShared(client, extensionID, url, key) }) {
+			return nil, context.Canceled
 		}
-		img, err := client.GetImageBytes(ctx, extensionID, url)
-		if err != nil {
-			return nil, err
-		}
-		data := img.GetData()
-		ct := img.GetContentType()
-		if len(data) > 0 {
-			mangaImages.put(key, data, ct)
-		}
-		return [2]any{data, ct}, nil
+		return value, fetchErr
 	})
-	if err != nil {
-		return nil, "", err
+	select {
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	case value := <-result:
+		if value.Err != nil {
+			return nil, "", value.Err
+		}
+		pair := value.Val.([2]any)
+		return pair[0].([]byte), pair[1].(string), nil
 	}
-	pair := v.([2]any)
-	data, _ := pair[0].([]byte)
-	ct, _ := pair[1].(string)
-	return data, ct, nil
 }
-
-// prefetchMangaImages warms the image cache for the given upstream URLs in the
-// background, bounded by prefetchSem. Already-cached URLs are skipped cheaply.
-func prefetchMangaImages(client *sandbox.Client, extensionID string, urls []string) {
-	for _, u := range urls {
-		if u == "" {
+func (m *MangaCache) fetchShared(client *sandbox.Client, extensionID, url, key string) (any, error) {
+	if data, ct, ok := m.images.get(key); ok {
+		return [2]any{data, ct}, nil
+	}
+	work, cancel := context.WithTimeout(m.Work.Context, 25*time.Second)
+	defer cancel()
+	img, err := client.GetImageBytes(work, extensionID, url)
+	if err != nil {
+		return nil, err
+	}
+	data, ct := img.GetData(), img.GetContentType()
+	if err := image.Validate(data); err != nil {
+		return nil, err
+	}
+	m.images.put(key, data, ct)
+	return [2]any{data, ct}, nil
+}
+func (m *MangaCache) prefetch(client *sandbox.Client, extensionID string, urls []string) {
+	for _, url := range urls {
+		if url == "" {
 			continue
 		}
-		if _, _, ok := mangaImages.get(mangaImageKey(extensionID, u)); ok {
+		if _, _, ok := m.images.get(mangaImageKey(extensionID, url)); ok {
 			continue
 		}
-		u := u
 		select {
-		case prefetchSem <- struct{}{}:
+		case m.slots <- struct{}{}:
 		default:
 			return
 		}
-		go func() {
-			defer func() { <-prefetchSem }()
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-			defer cancel()
-			_, _, _ = fetchMangaImage(ctx, client, extensionID, u)
-		}()
+		if !m.Work.Go(func() { defer func() { <-m.slots }(); _, _, _ = m.fetch(m.Work.Context, client, extensionID, url) }) {
+			<-m.slots
+			return
+		}
 	}
 }
+
+func (m *MangaCache) Clear() { m.images.clear() }

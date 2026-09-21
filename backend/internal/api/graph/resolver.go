@@ -9,6 +9,7 @@ import (
 
 	"tsunagu/backend/internal/api/graph/model"
 	"tsunagu/backend/internal/auth"
+	"tsunagu/backend/internal/automation"
 	"tsunagu/backend/internal/config"
 	"tsunagu/backend/internal/contentfilter"
 	"tsunagu/backend/internal/db/sqlcgen"
@@ -24,23 +25,25 @@ import (
 )
 
 type Resolver struct {
-	Sy        *syncpkg.Syncer
-	Sc        *sandbox.SupervisedClient
-	Dm        *download.Manager
-	Ls        *localsource.Scanner
-	Tk        *tracker.Manager
-	Md        *metadata.Manager
-	Sr        *streamresolve.Resolver
-	Q         *sqlcgen.Queries
-	DB        *sql.DB
-	Fs        *flaresolverr.Manager
-	Cfg       *config.Store
-	Cf        *contentfilter.Manager
-	Am        *auth.Manager
-	MediaDir  string
-	Name      string
-	Version   string
-	BuildTime string
+	Policies          *automation.Manager
+	ClearMemoryImages func()
+	Sy                *syncpkg.Syncer
+	Sc                *sandbox.SupervisedClient
+	Dm                *download.Manager
+	Ls                *localsource.Scanner
+	Tk                *tracker.Manager
+	Md                *metadata.Manager
+	Sr                *streamresolve.Resolver
+	Q                 *sqlcgen.Queries
+	DB                *sql.DB
+	Fs                *flaresolverr.Manager
+	Cfg               *config.Store
+	Cf                *contentfilter.Manager
+	Am                *auth.Manager
+	MediaDir          string
+	Name              string
+	Version           string
+	BuildTime         string
 
 	storageInfoMu      sync.Mutex
 	storageInfoCache   *model.StorageInfo
@@ -78,4 +81,9 @@ func (r *mutationResolver) refreshMediaFull(ctx context.Context, c *sandbox.Clie
 		entry = m
 	}
 	return entry, nil
+}
+
+// background keeps asynchronous resolver work owned by the syncer lifecycle.
+func (r *Resolver) background(fn func(context.Context)) {
+	r.Sy.Work.Go(func() { fn(r.Sy.Work.Context) })
 }
